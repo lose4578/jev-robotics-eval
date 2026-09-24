@@ -70,9 +70,13 @@ def run_episode(
                           environment.step(actual_action, scale=action_scale))
             if recovery is not None:
                 recovery.record_step(number, recovery_state, decision.action, choice)
-            on_action_executed = getattr(policy, "on_action_executed", None)
-            if callable(on_action_executed):
-                on_action_executed(actual_action)
+            on_motion_executed = getattr(policy, "on_motion_executed", None)
+            if callable(on_motion_executed):
+                on_motion_executed(actual_action, action_scale)
+            else:
+                on_action_executed = getattr(policy, "on_action_executed", None)
+                if callable(on_action_executed):
+                    on_action_executed(actual_action)
             observation = transition.observation
             total_reward += transition.reward
             evaluation_state = observation.evaluation_state or observation.state

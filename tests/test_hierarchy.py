@@ -235,6 +235,22 @@ def test_gripper_change_is_not_stall_and_reversal_is_recorded_without_forcing_an
     assert controller._adaptive_axis_reversals == 2
 
 
+def test_motion_callback_records_actual_scale_and_clears_only_mismatched_candidate():
+    controller = policy()
+    controller._sensor_last_action = "x_pos"
+    controller._adaptive_last_candidate = "x_pos_fine"
+    controller._adaptive_last_scale = 0.25
+    controller.on_motion_executed(Action.X_POS, 0.25)
+    assert controller._adaptive_last_candidate == "x_pos_fine"
+    controller.on_motion_executed(Action.X_POS, 1.0)
+    assert controller._adaptive_last_scale == 1.0
+    assert controller._adaptive_last_candidate is None
+    controller.on_motion_executed(Action.Y_NEG, 0.5)
+    assert controller._sensor_last_action == "y_neg"
+    assert controller._adaptive_last_scale == 0.5
+    assert controller._adaptive_last_candidate is None
+
+
 @pytest.mark.parametrize("kwargs", [{"mode": "text"}, {"sensor_policy": "direct"},
                                     {"action_space": "atomic"}, {"action_granularity": "invalid"}])
 @pytest.mark.parametrize("granularity", ("adaptive", "phase-fixed"))

@@ -476,6 +476,14 @@ class JevPolicy:
             self._adaptive_axis_reversals = 0
         self._sensor_last_action = action.value
 
+    def on_motion_executed(self, action: Action, scale: float) -> None:
+        """Record the actual primitive and amplitude, including external overrides."""
+        self.on_action_executed(action)
+        if self.action_granularity != "fixed":
+            if self._adaptive_last_scale != scale:
+                self._adaptive_last_candidate = None
+            self._adaptive_last_scale = float(scale)
+
     def _decide_adaptive(self, observation: Observation, task: str) -> Decision:
         state = observation.state
         level = state.get("privilege_level", 0 if state.get("information") == "nonprivileged" else None)

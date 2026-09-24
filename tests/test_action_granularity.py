@@ -27,13 +27,18 @@ def test_scaled_action_reaches_recording_environment_and_trace(tmp_path):
         def decide(self, observation, task):
             return Decision(Action.X_POS, action_scale=0.25)
 
+        def on_motion_executed(self, action, scale):
+            self.executed = (action, scale)
+
     environment = RecordingEnvironment(Environment())
     trace = tmp_path / "trace.jsonl"
-    result = run_episode(environment, Policy(), task="move", trace_path=trace, verbose=False)
+    policy = Policy()
+    result = run_episode(environment, policy, task="move", trace_path=trace, verbose=False)
     row = json.loads(trace.read_text())
     assert result.simulator_steps == 3
     assert row["action_scale"] == row["proposed_action_scale"] == 0.25
     assert "x0.25" in environment.labels[-1]
+    assert policy.executed == (Action.X_POS, 0.25)
 
 
 def test_metaworld_fine_motion_reduces_displacement_with_same_physics_budget():
