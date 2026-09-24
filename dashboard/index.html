@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JEV · 机器人实验回放</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="brand-mark">J</span><span>JEV / ROBOT EVALUATION</span></div>
+    <div class="heading"><div><p class="eyebrow">实验观察台</p><h1>每一次动作，都有迹可循。</h1><p class="intro">按实验、信息条件和任务查看结果，点击预览播放完整回放。</p></div><div class="connection"><span id="connection-dot" class="dot"></span><span id="connection">正在连接</span><button id="refresh" type="button">立即刷新</button></div></div>
+    <div class="notice"><strong>实验结果 · 按配置比较</strong><span>配置、任务和 seed 不同的实验分别展示。成功率分母只含有效完成的回合，执行异常与零动作记录单独统计。</span></div>
+    <p class="timestamps"><span id="last-updated">等待结果</span><span id="last-polled"></span></p>
+  </header>
+  <main>
+    <section class="overview" aria-label="当前记录概览" id="overview"></section>
+    <section class="controls" aria-label="筛选实验记录">
+      <label class="search">搜索<input type="search" id="search" placeholder="任务、实验、seed、episode…" autocomplete="off"></label>
+      <label>环境<select id="environment"><option value="all">全部环境</option><option value="metaworld">MetaWorld</option><option value="robotwin">RoboTwin</option></select></label>
+      <label>控制模式<select id="control-mode"><option value="all">全部控制模式</option><option value="hierarchical">分层 / 原子动作（全部）</option><option value="hierarchical_staged">分层控制 · JEV 阶段 → 动作</option><option value="atomic">原子动作 · 意图 / 视觉方向</option><option value="direct">直接控制 · 基础动作</option><option value="oracle_waypoints">Oracle 路标辅助</option><option value="unknown">未标注</option></select></label>
+      <label>实验<select id="experiment"><option value="all">全部实验</option></select></label>
+      <label>信息条件<select id="information"><option value="all">全部条件</option><option value="nonprivileged">无特权</option><option value="privileged">有特权</option><option value="unknown">未标注</option></select></label>
+      <label>等级<select id="level"><option value="all">全部等级</option><option value="0">L0</option><option value="1">L1</option><option value="2">L2</option><option value="3">L3</option><option value="unknown">未标注</option></select></label>
+      <label>实验条件<select id="condition"><option value="all">全部条件</option><option value="L0">L0 · 无特权</option><option value="L1">L1</option><option value="L2">L2</option><option value="L3">L3 · 完整特权</option><option value="L3-P">L3-P · 仅计划/路标</option><option value="unknown">未标注</option></select></label>
+      <label>仅计划/路标<select id="plan-only"><option value="all">全部设置</option><option value="true">是 · oracle 规划辅助</option><option value="false">否 · 常规信息条件</option></select></label>
+      <label>脱困辅助<select id="recovery"><option value="all">全部设置</option><option value="none">none · 无辅助</option><option value="jitter">jitter · 扰动脱困</option></select></label>
+      <label>结果<select id="status"><option value="all">全部结果</option><option value="success">成功</option><option value="failed">任务失败</option><option value="running">运行中</option><option value="pending">待运行 / 待同步</option><option value="error">执行异常 / 零动作</option><option value="unknown">结果未知</option></select></label>
+      <label>模式<select id="mode"><option value="all">全部模式</option><option value="vision">视觉</option><option value="text">文本</option><option value="unknown">未标注</option></select></label>
+      <label>动作选择<select id="selection"><option value="all">全部策略</option><option value="argmax">argmax</option><option value="sample">sample</option><option value="unknown">未标注</option></select></label>
+      <label>回放<select id="replay"><option value="all">全部记录</option><option value="yes">有 GIF</option><option value="no">暂无 GIF</option></select></label>
+    </section>
+    <div id="warning" class="warning" hidden></div>
+    <section aria-labelledby="groups-title">
+      <div class="section-heading"><h2 id="groups-title">实验与信息条件</h2><span id="group-count" class="muted"></span></div>
+      <p class="explanation">控制模式独立于信息等级：分层控制由 JEV 先选阶段、再选动作；原子动作由 JEV 选择意图或视觉方向，当前含规则候选约束，并不表示自主阶段规划。Oracle 路标辅助单列；旧记录缺少控制配置时标为未标注。</p>
+      <p class="explanation">每行对应一个环境、实验、信息条件和策略配置；L3 与 L3-P、none 与 jitter 脱困辅助、argmax 与 sample 分别统计。同一环境的相同 task / env seed 重复回合逐条计数，policy seed 与实际干预次数不拆分策略组。成功率始终显示该组完整分母；下方筛选不会改变它。</p>
+      <p class="explanation">L0：RGB、本体、自身历史与相机标定；L1：加物体 / 目标 / 场景真实位置；L2：加接触、抬升、距离与完成几何指标；L3：再加 oracle 阶段与 waypoint 路标。</p>
+      <p class="explanation">L3-P：仅计划/路标。保留既有 oracle 阶段与 waypoint，去掉环境物体位置等额外真值；仍属于有特权的 oracle 规划辅助。plan_only=true 的 L3 记录单独展示，并记录每回合脱困干预次数。</p>
+      <div class="table-wrap"><table><thead><tr><th>实验 / 配置</th><th>控制模式</th><th>信息条件</th><th>成功率</th><th>已完成 / 计划</th><th>其他状态</th><th>最后更新</th></tr></thead><tbody id="groups"></tbody></table></div>
+    </section>
+    <section aria-labelledby="runs-title">
+      <div class="section-heading"><h2 id="runs-title">任务回放</h2><span id="run-count" class="muted"></span></div>
+      <div class="cards" id="runs"></div>
+      <p id="empty" class="empty" hidden>没有匹配的记录。调整筛选条件，或等待新的实验结果。</p>
+      <button id="show-more" class="show-more" type="button" hidden>加载更多记录</button>
+    </section>
+  </main>
+  <footer>每 5 秒更新 · 运行中状态来自实验调度记录，最后更新时间可用于识别停止更新的任务 · 仅有 GIF 的历史回放不计入成功率</footer>
+  <dialog id="player"><div class="player-heading"><h2 id="player-title"></h2><button id="close-player" type="button" aria-label="关闭回放">关闭</button></div><img id="player-image" alt="任务 GIF 回放"><p id="player-caption"></p><a id="player-download" target="_blank" rel="noopener">打开原始 GIF ↗</a></dialog>
+</body>
+</html>

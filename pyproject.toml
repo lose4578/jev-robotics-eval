@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jev-robo-eval"
+version = "0.1.0"
+description = "Evaluate JEV robot control in MetaWorld and RoboTwin"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "Pillow>=10"]
+
+[project.urls]
+Repository = "https://github.com/lose4578/jev-robotics-eval"
+Issues = "https://github.com/lose4578/jev-robotics-eval/issues"
+
+[project.optional-dependencies]
+metaworld = ["metaworld>=3,<4"]
+test = ["pytest>=8"]
+
+[project.scripts]
+jev-robo-eval = "jev_robo_eval.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+runs/
+.serena/
+.venv/
+build/
+dist/
+.env
+.env.*
+!.env.example
+
+# Private experiment artifacts and local deployment helpers.
+reports/
+docs/historical-run-notes-zh.md
+scripts/audit_conditions.py
+scripts/audit_scene_perception.py
+scripts/audit_vision.py
+src/jev_robo_eval/vision_server.py
