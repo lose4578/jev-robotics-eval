@@ -238,10 +238,13 @@ async function refresh() {
     byId('refresh').disabled = false;
   }
 }
-const requestedControl = new URL(window.location.href).searchParams.get('control-mode');
-if ([...byId('control-mode').options].some(option => option.value === requestedControl)) byId('control-mode').value = requestedControl;
+const sharedFilters = ['control-mode', 'granularity'];
+for (const id of sharedFilters) {
+  const requested = new URL(window.location.href).searchParams.get(id);
+  if ([...byId(id).options].some(option => option.value === requested)) byId(id).value = requested;
+}
 for (const id of filters) byId(id).addEventListener(id === 'search' ? 'input' : 'change', () => {
-  if (id === 'control-mode') {
+  if (sharedFilters.includes(id)) {
     const url = new URL(window.location.href);
     if (byId(id).value === 'all') url.searchParams.delete(id);
     else url.searchParams.set(id, byId(id).value);
