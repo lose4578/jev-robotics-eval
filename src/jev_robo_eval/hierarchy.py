@@ -14,8 +14,6 @@ HIERARCHY_PROTOCOL = "jev.phase_scaled_primitive.v1"
 PHASE_FIXED_PROTOCOL = "jev.phase_fixed_primitive.v1"
 MOTION_SCALES = {"fine": 0.25, "normal": 0.5, "coarse": 1.0}
 _XYZ = (Action.X_POS, Action.X_NEG, Action.Y_POS, Action.Y_NEG, Action.Z_POS, Action.Z_NEG)
-_XY = _XYZ[:4]
-_Z = _XYZ[4:]
 
 
 @dataclass(frozen=True)
@@ -130,29 +128,17 @@ def phase_action_candidates(schema: PhaseSchema, phase: str,
         raise ValueError("Hierarchy candidate granularity must be adaptive or phase-fixed")
     if phase not in schema.phases:
         raise ValueError(f"Unknown {schema.family} phase: {phase}")
-    if phase == "approach":
-        groups = ((_XYZ, ("normal", "coarse")),)
-    elif phase == "lift":
-        groups = ((_Z, ("fine", "normal", "coarse")), (_XY, ("fine",)))
-    elif phase == "transfer":
-        groups = ((_XY, ("normal", "coarse")), (_Z, ("fine", "normal")))
-    elif phase == "push":
-        groups = ((_XY, ("fine", "normal", "coarse")), (_Z, ("fine",)))
-    else:
-        groups = ((_XYZ, ("fine", "normal")),)
     candidates = []
-    for actions, sizes in groups:
-        for action in actions:
-            if granularity == "phase-fixed":
-                candidates.append(MotionCandidate(
-                    f"{action.value}_fixed", action, 1.0,
-                    f"{ACTION_DESCRIPTIONS[action]} Fixed motion: 1 times the configured movement amplitude; preserve gripper."))
-                continue
-            for size in sizes:
-                scale = MOTION_SCALES[size]
-                candidates.append(MotionCandidate(
-                    f"{action.value}_{size}", action, scale,
-                    f"{ACTION_DESCRIPTIONS[action]} {size.capitalize()} motion: {scale:g} times the configured movement amplitude; preserve gripper."))
+    for action in _XYZ:
+        if granularity == "phase-fixed":
+            candidates.append(MotionCandidate(
+                f"{action.value}_fixed", action, 1.0,
+                f"{ACTION_DESCRIPTIONS[action]} Fixed motion: 1 times the configured movement amplitude; preserve gripper."))
+            continue
+        for size, scale in MOTION_SCALES.items():
+            candidates.append(MotionCandidate(
+                f"{action.value}_{size}", action, scale,
+                f"{ACTION_DESCRIPTIONS[action]} {size.capitalize()} motion: {scale:g} times the configured movement amplitude; preserve gripper."))
 
     settings = ()
     if schema.family == "pick_place":

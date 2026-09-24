@@ -537,8 +537,7 @@ class JevPolicy:
                     "Infer the current operation from the RGB image and permitted observation fields. "
                     + schema.description + " " + eligibility_reason + " "
                     "The previous inferred phase is a hypothesis. A gripper command alone cannot prove a grasp or contact. "
-                    "Repeated actions or low TCP motion are evidence to reassess "
-                    + ("alignment, scale, or recovery; " if adaptive else "alignment or recovery; ") +
+                    "Repeated actions or low TCP motion are evidence to reassess alignment, contact, or recovery; "
                     "contact can legitimately constrain motion. Use object pose or contact facts only if explicitly provided. "
                     "Choose the contact operation only when current alignment and contact support it. "
                     "Recovery is temporary: return to approach or contact when their visual conditions apply. "
@@ -567,6 +566,13 @@ class JevPolicy:
             "Each candidate chooses a primitive. Every motion uses a fixed 1.0 times the configured movement "
             "amplitude and the same duration; movement amplitude is not a model choice. "
         )
+        if adaptive:
+            amplitude_instructions += {
+                "approach": "During approach, coarse motion can cover clear travel; refine near the object. ",
+                "lift": "During lift, use coarse motion only with clear space and fine motion near obstacles. ",
+                "transfer": "During transfer, coarse motion can cover clear travel; refine near the destination. ",
+                "recover": "During recovery, prefer fine corrections near contact; coarse motion remains available for clear repositioning. ",
+            }.get(phase, "Near contact or final alignment, prefer fine corrections; coarse motion remains available when current evidence justifies it. ")
         instructions = (
             "Choose exactly one candidate ID. " + amplitude_instructions
             + f"Current inferred phase {phase}: {schema.phases[phase]} "

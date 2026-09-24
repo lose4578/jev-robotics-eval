@@ -34,9 +34,14 @@ def test_every_registered_task_has_a_bounded_family_schema(task_name):
             phases, _ = eligible_phases(schema, phase, command)
             assert phases and set(phases) <= set(schema.phases)
             candidates = phase_action_candidates(schema, phase, command)
-            assert len(candidates) <= 16
+            assert len(candidates) <= 20
             assert len({candidate.id for candidate in candidates}) == len(candidates)
             assert all(0 < candidate.scale <= 1 for candidate in candidates)
+            movements = [candidate for candidate in candidates
+                         if candidate.action not in {Action.GRIP_OPEN, Action.GRIP_CLOSE, Action.HOLD}]
+            assert len(movements) == 18
+            for action in {candidate.action for candidate in movements}:
+                assert {candidate.scale for candidate in movements if candidate.action == action} == {0.25, 0.5, 1.0}
             assert ("grip_open" if command == "open" else "grip_close") not in {
                 candidate.id for candidate in candidates}
 
@@ -58,14 +63,14 @@ def test_contact_families_have_no_mandatory_grasp_lift_or_transfer(task_name, fa
     assert "contact" in eligible_phases(schema, None, "open")[0]
 
 
-def test_motion_candidates_keep_both_signs_and_phase_specific_granularity():
+def test_motion_candidates_keep_both_signs_and_all_scales():
     schema = schema_for_task("push-v3")
     choices = {candidate.id: candidate for candidate in phase_action_candidates(schema, "push", "closed")}
-    for direction in ("x_pos", "x_neg", "y_pos", "y_neg"):
+    for direction in ("x_pos", "x_neg", "y_pos", "y_neg", "z_pos", "z_neg"):
         for size, scale in MOTION_SCALES.items():
             assert choices[f"{direction}_{size}"].scale == scale
     assert "z_pos_fine" in choices and "z_neg_fine" in choices
-    assert "z_pos_coarse" not in choices
+    assert "z_pos_coarse" in choices
 
 
 @pytest.mark.parametrize("task_name", TASK_REGISTRY)
@@ -99,8 +104,7 @@ def test_phase_fixed_runs_the_same_two_stage_hierarchy_with_distinct_protocol(mo
         decisions[granularity] = controller.decide(observation(), "Press the button.")
         assert len(sent) == 2
         requests[granularity] = sent
-    assert requests["adaptive"][0]["state"] == requests["phase-fixed"][0]["state"]
-    assert requests["adaptive"][0]["questions"]["phase"]["criteria"] == requests["phase-fixed"][0]["questions"]["phase"]["criteria"]
+    assert requests["adaptive"][0] == requests["phase-fixed"][0]
     assert requests["adaptive"][1]["state"] == requests["phase-fixed"][1]["state"]
     assert decisions["adaptive"].action == decisions["phase-fixed"].action == Action.Y_POS
     assert decisions["adaptive"].action_scale == 0.25
@@ -254,7 +258,7 @@ def test_unknown_task_fails_explicitly():
         policy().decide(observation(task="unsupported-task"), "Do the task.")
 
 
-@pytest.mark.parametrize("choice", ["y_pos", "y_pos_coarse", "unknown"])
+@pytest.mark.parametrize("choice", ["y_pos", "y_pos_fixed", "unknown"])
 def test_action_outside_offered_candidates_fails(monkeypatch, choice):
     controller = policy()
 
