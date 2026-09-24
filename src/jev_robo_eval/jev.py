@@ -23,6 +23,7 @@ from .atomic_actions import (
 )
 from .core import ACTION_DESCRIPTIONS, Action, Decision, Observation
 from .hierarchy import HIERARCHY_PROTOCOL, PHASE_FIXED_PROTOCOL, MotionCandidate, eligible_phases, phase_action_candidates, schema_for_task
+from .grounding import candidate_grounding, phase_target_role, target_evidence
 from .tasks import ROBOTWIN_TASK_GUIDES, TASK_GUIDES, task_goal
 from .observation_access import filter_policy_state
 
@@ -112,7 +113,8 @@ def _sensor_state(state: dict, task_name: str) -> dict:
     result = {"information": "nonprivileged", "task_name": task_name}
     for name in ("coordinate_frame", "control_point", "control_xyz", "gripper_opening",
                  "gripper_command", "simulator_steps", "camera_name",
-                 "action_screen_directions", "environment", "active_arm", "control_steps", "tcp_pixel"):
+                 "action_screen_directions", "environment", "active_arm", "control_steps", "tcp_pixel",
+                 "nominal_motion_step_m"):
         if name in state:
             result[name] = state[name]
     robot = state.get("robot")
@@ -499,6 +501,9 @@ class JevPolicy:
                      else task_goal(task_name, information="nonprivileged"))
         model_state = {**visible_state, "task": task_text, "privilege_level": level,
                        "task_family": schema.family, "task_semantics": schema.description}
+        targets = target_evidence(model_state, schema.family)
+        if targets:
+            model_state["target_evidence"] = targets
         step = int(state.get("control_steps", state.get("simulator_steps", 0)))
         if (self._sensor_last_task != task_name or step == 0
                 or (self._sensor_last_step is not None and step <= self._sensor_last_step)):
@@ -542,14 +547,11 @@ class JevPolicy:
             "questions": {"phase": {
                 "type": "choice", "criteria": phase_choices,
                 "instructions": (
-                    "Infer the current operation from the RGB image and permitted observation fields. "
-                    + schema.description + " " + eligibility_reason + " "
-                    "The previous inferred phase is a hypothesis. A gripper command alone cannot prove a grasp or contact. "
-                    "Repeated actions or low TCP motion are evidence to reassess alignment, contact, or recovery; "
-                    "contact can legitimately constrain motion. Use object pose or contact facts only if explicitly provided. "
-                    "Choose the contact operation only when current alignment and contact support it. "
-                    "Recovery is temporary: return to approach or contact when their visual conditions apply. "
-                    "A gripper setting change need not move the TCP and does not itself justify recovery. "
+                    "Choose the CURRENT evidence state from the RGB image and permitted observation. "
+                    + eligibility_reason + " A large contact-point distance contradicts adjacency or established contact. "
+                    "target_evidence, when present, is derived only from permitted poses. "
+                    "A closed command alone proves neither holding nor contact. Low motion alone may reflect contact; "
+                    "recovery requires obstruction or lost engagement evidence. "
                     + SENSOR_PHASE_TASK.get(task_name, "")
                 ),
             }},
@@ -566,10 +568,18 @@ class JevPolicy:
         phase_evidence = {"request": phase_request, "choice": phase, "probabilities": probabilities,
                           "usage": self._response_usage(phase_result), "provenance": "model_inference"}
         candidates = phase_action_candidates(schema, phase, gripper_command, self.action_granularity)
+        candidates = tuple(MotionCandidate(
+            candidate.id, candidate.action, candidate.scale,
+            candidate_grounding(candidate.action, schema.family, phase, targets, state.get("environment"),
+                                scale=candidate.scale, nominal_motion_step_m=model_state.get("nominal_motion_step_m"))
+            + " " + candidate.description,
+        ) for candidate in candidates)
         amplitude_instructions = (
             "Each candidate chooses a primitive AND its movement amplitude. "
             "Fine = 0.25, normal = 0.5, coarse = 1.0 times the configured movement amplitude, with the same duration. "
             "Use coarse for clear travel, fine near contact or the target, and normal for intermediate corrections. "
+            "nominal_motion_step_m, when present, is the nominal distance for 1x coarse motion; "
+            "multiply it by the candidate scale. Actual motion depends on collision and tracking. "
             if adaptive else
             "Each candidate chooses a primitive. Every motion uses a fixed 1.0 times the configured movement "
             "amplitude and the same duration; movement amplitude is not a model choice. "
@@ -597,13 +607,17 @@ class JevPolicy:
         )
         if level >= 1:
             instructions += (
-                " Use the permitted object, goal, and scene coordinates together with the image to identify the "
-                "current contact or placement target. Compare that target with control_xyz to select the signed axis: "
-                "target minus control positive means the positive action, and negative means the negative action. "
+                " Candidate error effects describe initial geometric alignment, not physical contact or success. "
+                "After engagement, task motion may legitimately increase a contact-point error. "
                 "The previous action is history, not a direction instruction."
             )
+        target_role = phase_target_role(schema.family, phase, state.get("environment"))
         action_request = {
             "model": MODEL, "state": {**model_state, "inferred_phase": phase},
+            "target_role": {"selected_by_model_phase": target_role,
+                            "provenance": ("derived_from_permitted_pose" if target_role in targets
+                                           else "phase_semantics" if target_role is None
+                                           else "visual_inference_required")},
             "candidate_protocol": HIERARCHY_PROTOCOL if adaptive else PHASE_FIXED_PROTOCOL,
             "candidates": [candidate.to_dict() for candidate in candidates],
             "questions": {"action": {"type": "choice", "instructions": instructions,

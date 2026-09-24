@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from .core import ACTION_DESCRIPTIONS, Action
 
 
-HIERARCHY_PROTOCOL = "jev.phase_scaled_primitive.v1"
-PHASE_FIXED_PROTOCOL = "jev.phase_fixed_primitive.v1"
+HIERARCHY_PROTOCOL = "jev.phase_scaled_primitive.v2"
+PHASE_FIXED_PROTOCOL = "jev.phase_fixed_primitive.v2"
 MOTION_SCALES = {"fine": 0.25, "normal": 0.5, "coarse": 1.0}
 _XYZ = (Action.X_POS, Action.X_NEG, Action.Y_POS, Action.Y_NEG, Action.Z_POS, Action.Z_NEG)
 
@@ -21,60 +21,42 @@ class PhaseSchema:
     family: str
     description: str
     phases: dict[str, str]
-    neighbors: dict[str, tuple[str, ...]]
 
 
 _CONTACT_PHASES = {
-    "approach": "Move toward the visible contact surface, leaving room to align the tool.",
-    "contact": "Align the fingers with the visible contact surface and establish gentle contact.",
-    "recover": "Reposition after a missed contact, obstruction, or motion without visible progress.",
+    "approach": "The TCP is still far from or misaligned with the contact surface; contact has not been reached.",
+    "contact": "The TCP is adjacent to and aligned with the contact surface, but stable engagement is not yet established.",
+    "recover": "Previously established contact was lost, or motion is visibly obstructed; ordinary incomplete approach is not recovery.",
 }
 
 
 def _contact_schema(family: str, operation: str, description: str, operation_text: str) -> PhaseSchema:
-    return PhaseSchema(family, description, {**_CONTACT_PHASES, operation: operation_text}, {
-        "approach": ("approach", "contact", "recover"),
-        "contact": ("contact", "approach", operation, "recover"),
-        operation: (operation, "contact", "recover"),
-        "recover": ("recover", "approach", "contact"),
-    })
+    return PhaseSchema(family, description, {**_CONTACT_PHASES, operation: operation_text})
 
 
 SCHEMAS = {
     "pressing": _contact_schema(
         "pressing", "press", "Press the visible actuator along its travel direction; no object transfer is required.",
-        "Maintain contact and move the actuator along its visible travel direction to press it."),
+        "The TCP is currently touching the aligned actuator surface, and the actuator stroke is incomplete."),
     "horizontal_push": _contact_schema(
         "horizontal_push", "push", "Push the object or panel toward its destination while maintaining contact.",
-        "Push horizontally toward the visible destination, adjusting contact when necessary."),
+        "The TCP has established pushing contact, and the object or panel is not yet at its destination."),
     "pull_slide": _contact_schema(
         "pull_slide", "move", "Engage the handle and pull or slide it along the mechanism's visible travel.",
-        "Preserve handle contact and move along the intended slide or hinge motion."),
+        "The handle is currently engaged, and its slide or hinge travel is incomplete."),
     "reach": PhaseSchema("reach", "Move the robot TCP to the visible target point.", {
-        "approach": "Reduce the visible distance between the TCP and target.",
-        "refine": "Make small corrections near the visible target without changing the gripper.",
-        "recover": "Reposition when a prior motion was blocked or increased the target error.",
-    }, {
-        "approach": ("approach", "refine", "recover"),
-        "refine": ("refine", "approach", "recover"),
-        "recover": ("recover", "approach", "refine"),
+        "approach": "The TCP remains clearly separated from the target.",
+        "refine": "The TCP is already near the target and only final alignment remains.",
+        "recover": "Motion toward the target is visibly obstructed or has lost its alignment.",
     }),
     "pick_place": PhaseSchema("pick_place", "Acquire the object, lift it, then carry and place or insert it.", {
-        "approach": "Align the open fingers above the visible object before descending.",
-        "lower": "Descend toward the object while correcting the fingers' alignment.",
-        "grasp": "Close the fingers around the object and check that it is held.",
-        "lift": "Raise the held object clear of nearby surfaces and obstacles.",
-        "transfer": "Carry the raised object toward the visible destination.",
-        "place": "Align and lower or insert the held object; release when appropriate.",
-        "recover": "Reacquire a missed or dropped object, or reposition after blocked motion.",
-    }, {
-        "approach": ("approach", "lower", "recover"),
-        "lower": ("lower", "approach", "grasp", "recover"),
-        "grasp": ("grasp", "lift", "lower", "recover"),
-        "lift": ("lift", "transfer", "recover"),
-        "transfer": ("transfer", "place", "recover"),
-        "place": ("place", "transfer", "recover"),
-        "recover": ("recover", "approach", "lower"),
+        "approach": "The fingers are not yet horizontally aligned above the object.",
+        "lower": "The fingers are horizontally aligned above the object but remain above grasping height.",
+        "grasp": "The fingers surround the object at grasping height, but a stable hold is not yet established.",
+        "lift": "The object is visibly held but has not yet cleared nearby surfaces.",
+        "transfer": "The object is visibly held and clear of surfaces, but remains away from its destination.",
+        "place": "The held object is aligned at its destination; final seating or release remains.",
+        "recover": "A grasp failed, a held object was dropped, or motion is visibly obstructed.",
     }),
 }
 
@@ -97,11 +79,10 @@ def schema_for_task(task_name: str) -> PhaseSchema:
 
 def eligible_phases(schema: PhaseSchema, previous_phase: str | None,
                     gripper_command: str) -> tuple[dict[str, str], str]:
-    prior = previous_phase if previous_phase in schema.neighbors else "approach"
-    candidates = schema.neighbors[prior]
+    candidates = tuple(schema.phases)
     reason = (
-        f"Use the {prior} neighborhood as a temporal prior based on model history, not proof of progress. "
-        "Choose recovery if current evidence contradicts the previous phase."
+        "Classify the current evidence, not the requested task verb. Every phase can be reconsidered now; "
+        "the previous inferred phase is only history."
     )
     if schema.family == "pick_place" and gripper_command == "open":
         candidates = tuple(phase for phase in candidates if phase not in {"lift", "transfer", "place"})
@@ -146,7 +127,7 @@ def phase_action_candidates(schema: PhaseSchema, phase: str,
             settings = (Action.GRIP_OPEN,)
         elif phase == "grasp":
             settings = (Action.GRIP_CLOSE,)
-    elif schema.family in {"pressing", "horizontal_push"} and phase in {"approach", "contact", "recover"}:
+    elif schema.family in {"pressing", "horizontal_push"}:
         settings = (Action.GRIP_CLOSE,)
     elif schema.family == "pull_slide" and phase in {"contact", "recover"}:
         settings = (Action.GRIP_OPEN, Action.GRIP_CLOSE)

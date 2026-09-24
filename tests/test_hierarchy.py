@@ -73,6 +73,17 @@ def test_motion_candidates_keep_both_signs_and_all_scales():
     assert "z_pos_coarse" in choices
 
 
+def test_phases_can_be_reconsidered_immediately_after_a_wrong_operation():
+    pressing = schema_for_task("button-press-v3")
+    for previous in (None, "press", "recover"):
+        assert set(eligible_phases(pressing, previous, "open")[0]) == set(pressing.phases)
+    picking = schema_for_task("pick-place-v3")
+    assert set(eligible_phases(picking, "place", "closed")[0]) == set(picking.phases)
+    assert set(eligible_phases(picking, "place", "open")[0]) == set(picking.phases) - {"lift", "transfer", "place"}
+    for task, phase in (("button-press-v3", "press"), ("push-v3", "push")):
+        assert "grip_close" in {c.id for c in phase_action_candidates(schema_for_task(task), phase, "open")}
+
+
 @pytest.mark.parametrize("task_name", TASK_REGISTRY)
 def test_phase_fixed_preserves_family_primitive_eligibility_at_unit_scale(task_name):
     schema = schema_for_task(task_name)
@@ -161,10 +172,11 @@ def test_l0_hidden_truth_cannot_change_requests_candidates_or_decision(monkeypat
         monkeypatch.setattr(controller, "_post", post)
         obs = observation(object_xyz=[marker] * 3, goal_xyz=[marker] * 3,
                           scene={"object": marker}, both_fingers_touch_object=True,
-                          unexpected_truth=marker, robot={"oracle_secret": marker})
+                          unexpected_truth=marker, robot={"oracle_secret": marker}, nominal_motion_step_m=0.02)
         decision = controller.decide(obs, "Press the visible button.")
         assert marker not in json.dumps(sent)
         assert "hidden_success" not in json.dumps(sent)
+        assert sent[0]["request"]["state"]["nominal_motion_step_m"] == 0.02
         recordings.append((sent, decision.action, decision.action_scale))
     assert recordings[0] == recordings[1]
 
@@ -188,6 +200,11 @@ def test_adaptive_uses_exact_level_budget_for_both_requests(monkeypatch, level):
         assert request["state"]["object_xyz"] == [0.1, 0.7, 0.1]
         assert ("both_fingers_touch_object" in request["state"]) == (level == 2)
         assert "hidden_success" not in request["state"]
+        assert request["state"]["target_evidence"]["contact"]["source"] == "object_xyz"
+        assert request["state"]["target_evidence"]["contact"]["delta_xyz"] == [0.1, 0.1, -0.05]
+    criteria = sent[-1]["questions"]["action"]["criteria"]
+    assert "initially reduces" in criteria["y_pos_fine"]
+    assert "increases" in criteria["y_neg_fine"]
     # Coordinates do not choose an action in the executor: the model chose Y-.
     assert decision.action == Action.Y_NEG and decision.action_scale == 0.25
 
