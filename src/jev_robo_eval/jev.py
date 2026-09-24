@@ -567,49 +567,24 @@ class JevPolicy:
         candidates = tuple(MotionCandidate(
             candidate.id, candidate.action, candidate.scale,
             candidate_grounding(candidate.action, schema.family, phase, targets, state.get("environment"),
-                                scale=candidate.scale, nominal_motion_step_m=model_state.get("nominal_motion_step_m"))
-            + " " + candidate.description,
+                                scale=candidate.scale, nominal_motion_step_m=model_state.get("nominal_motion_step_m")),
         ) for candidate in candidates)
-        amplitude_instructions = (
-            "Each candidate chooses a primitive AND its movement amplitude. "
-            "Fine = 0.25, normal = 0.5, coarse = 1.0 times the configured movement amplitude, with the same duration. "
-            "Use coarse for clear travel, fine near contact or the target, and normal for intermediate corrections. "
-            "nominal_motion_step_m, when present, is the nominal distance for 1x coarse motion; "
-            "multiply it by the candidate scale. Actual motion depends on collision and tracking. "
-            if adaptive else
-            "Each candidate chooses a primitive. Every motion uses a fixed 1.0 times the configured movement "
-            "amplitude and the same duration; movement amplitude is not a model choice. "
-        )
-        if adaptive:
-            amplitude_instructions += {
-                "approach": "During approach, coarse motion can cover clear travel; refine near the object. ",
-                "lift": "During lift, use coarse motion only with clear space and fine motion near obstacles. ",
-                "transfer": "During transfer, coarse motion can cover clear travel; refine near the destination. ",
-                "recover": "During recovery, prefer fine corrections near contact; coarse motion remains available for clear repositioning. ",
-            }.get(phase, "Near contact or final alignment, prefer fine corrections; coarse motion remains available when current evidence justifies it. ")
-        instructions = (
-            "Choose exactly one candidate ID. " + amplitude_instructions
-            + f"Current inferred phase {phase}: {schema.phases[phase]} "
-            "Every motion changes one signed world axis. Decide the useful sign from the image and permitted state; "
-            "candidate order is not a recommendation. Gripper settings persist. Hold only to settle or if complete. "
-            "If repeated movement stalls or overshoots, reassess "
-            + ("direction and scale" if adaptive else "direction") + " from current evidence. "
-            "Axis reversal history can indicate oscillation, but does not prove an overshoot. Recheck the "
-            "current target direction before reversing. "
-            + ("Use fine corrections near alignment. " if adaptive else "") +
-            "action_screen_directions, when provided, maps world actions to image motion of the robot TCP. "
-            "tcp_pixel, when provided, is the calibrated robot TCP location; u grows right and v down. "
-            + SENSOR_PHASE_TASK.get(task_name, "")
-        )
-        if level >= 1:
-            instructions += (
-                " Candidate error effects describe initial geometric alignment, not physical contact or success. "
-                "After engagement, task motion may legitimately increase a contact-point error. "
-                "The previous action is history, not a direction instruction."
-            )
         target_role = phase_target_role(schema.family, phase, state.get("environment"))
+        action_state = compact_action_state(model_state, task_name, schema.family, phase, targets)
+        target_key = f"current_{target_role}_xyz"
+        if target_key in action_state:
+            instructions = (f"Choose one movement toward {target_key} from robot_tcp_xyz. "
+                            "Prefer the largest remaining coordinate gap. ")
+        else:
+            instructions = ("Choose one movement for the current operation using the image and current_target_surface. "
+                            "action_screen_directions gives image displacement [right, down] for each world action. ")
+        instructions += ("Use coarse for clear travel, fine near alignment. " if adaptive else
+                         "Each move has the fixed 1.0 times nominal step size. ")
+        instructions += "Nominal motion may differ from actual motion due to contact or tracking. Gripper settings persist."
+        if "previous_action" in action_state:
+            instructions += " Reassess after blocked or reversing motion; previous_action is history."
         action_request = {
-            "model": MODEL, "state": {**compact_action_state(model_state), "inferred_phase": phase},
+            "model": MODEL, "state": action_state,
             "target_role": {"selected_by_model_phase": target_role,
                             "provenance": ("derived_from_permitted_pose" if target_role in targets
                                            else "phase_semantics" if target_role is None
@@ -621,7 +596,10 @@ class JevPolicy:
         }
         result = self._post(self._vision_payload(action_request, image_base64))
         decision = self._adaptive_decision_from_result(
-            result, {**action_request, "phase_decision": phase_evidence}, candidates, image_audit=image_audit)
+            result, {**action_request, "phase_decision": phase_evidence,
+                     "observation_audit": {"full_task": task_text, "target_evidence": targets,
+                                           "history": {key: model_state[key] for key in ("motion_history", "decisions_in_previous_phase") if key in model_state}}},
+            candidates, image_audit=image_audit)
         self._adaptive_action_repeats = (self._adaptive_action_repeats + 1
                                          if self._sensor_last_action == decision.action.value else 1)
         opposite = {"x_pos": "x_neg", "x_neg": "x_pos", "y_pos": "y_neg", "y_neg": "y_pos",

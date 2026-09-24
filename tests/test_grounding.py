@@ -34,9 +34,9 @@ def test_signed_effects_describe_both_choices_and_still_point_up_for_low_tcp():
     for phase in ("approach", "press"):
         toward = candidate_grounding(Action.Z_POS, "pressing", phase, evidence)
         away = candidate_grounding(Action.Z_NEG, "pressing", phase, evidence)
-        assert "initially reduces" in toward
-        assert "increases" in away
-    assert "requires engagement" in candidate_grounding(Action.Y_POS, "pressing", "press", evidence)
+        assert "moves toward" in toward
+        assert "moves away from" in away
+    assert "destination coordinate" in candidate_grounding(Action.Y_POS, "pressing", "press", evidence)
 
 
 def test_unknown_fields_cannot_change_grounding_and_bad_pose_is_not_replaced():
@@ -53,7 +53,7 @@ def test_empty_grasp_phases_use_contact_and_lift_has_no_fabricated_waypoint():
     assert phase_target_role("pick_place", "lift") is None
     text = candidate_grounding(Action.Y_POS, "pick_place", "approach", {})
     assert "visible contact surface" in text
-    assert " m" not in text
+    assert "signed error" not in text and "Nominal step" not in text
 
 
 def test_nominal_calibration_marks_possible_crossing_without_removing_a_choice():
@@ -62,11 +62,11 @@ def test_nominal_calibration_marks_possible_crossing_without_removing_a_choice()
                                scale=0.25, nominal_motion_step_m=0.02)
     coarse = candidate_grounding(Action.X_POS, "pressing", "approach", evidence,
                                  scale=1.0, nominal_motion_step_m=0.02)
-    assert "0.005 m" in fine and "may cross" not in fine
-    assert "0.02 m" in coarse and "may cross" in coarse
+    assert "0.0050 m" in fine and "may cross" not in fine
+    assert "0.0200 m" in coarse and "may cross" in coarse
     visual = candidate_grounding(Action.X_POS, "pressing", "approach", {},
                                  scale=0.25, nominal_motion_step_m=0.02)
-    assert "0.005 m" in visual and "may cross" not in visual
+    assert "0.0050 m" in visual and "may cross" not in visual
 
 
 @pytest.mark.parametrize("level", [0, 1, 2])
@@ -83,9 +83,10 @@ def test_compact_phase_excludes_intention_history_and_bulk_context(level):
         allowed.add("both_fingers_touch_object")
     assert set(compact) == allowed
     assert compact["current_contact_surface"] == "red button top"
-    action_state = compact_action_state(visible)
+    action_state = compact_action_state(visible, "button-press-topdown-v3", "pressing", "approach",
+                                        target_evidence(visible, "pressing"))
     assert "scene" not in action_state and "robot" not in action_state and "task_semantics" not in action_state
-    assert action_state["task"] == "Press down immediately"
+    assert action_state["task"] == "Approach the current contact point."
     assert action_state["action_screen_directions"] == {"z_neg": "down"}
 
 

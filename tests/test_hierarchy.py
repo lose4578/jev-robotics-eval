@@ -198,17 +198,39 @@ def test_adaptive_uses_exact_level_budget_for_both_requests(monkeypatch, level):
                                             goal_xyz=[0.1, 0.8, 0.1], both_fingers_touch_object=True,
                                             hidden_success=True), "Press the button.")
     assert sent[0]["state"]["current_contact_xyz"] == [0.1, 0.7, 0.1]
-    assert sent[1]["state"]["object_xyz"] == [0.1, 0.7, 0.1]
+    assert sent[1]["state"]["current_contact_xyz"] == [0.1, 0.7, 0.1]
     for request in sent:
         assert ("both_fingers_touch_object" in request["state"]) == (level == 2)
         assert "hidden_success" not in request["state"]
-    assert sent[1]["state"]["target_evidence"]["contact"]["source"] == "object_xyz"
-    assert sent[1]["state"]["target_evidence"]["contact"]["delta_xyz"] == [0.1, 0.1, -0.05]
+    assert "target_evidence" not in sent[1]["state"]
+    assert decision.request["observation_audit"]["target_evidence"]["contact"]["source"] == "object_xyz"
+    assert decision.request["observation_audit"]["target_evidence"]["contact"]["delta_xyz"] == [0.1, 0.1, -0.05]
     criteria = sent[-1]["questions"]["action"]["criteria"]
-    assert "initially reduces" in criteria["y_pos_fine"]
-    assert "increases" in criteria["y_neg_fine"]
+    assert "moves toward" in criteria["y_pos_fine"]
+    assert "moves away from" in criteria["y_neg_fine"]
     # Coordinates do not choose an action in the executor: the model chose Y-.
     assert decision.action == Action.Y_NEG and decision.action_scale == 0.25
+
+
+@pytest.mark.parametrize("level", [0, 1, 2])
+def test_interaction_facts_reach_both_heads_only_at_l2(monkeypatch, level):
+    controller = policy()
+    sent = []
+
+    def post(payload):
+        request = payload["request"]
+        sent.append(request)
+        key = "phase" if "phase" in request["questions"] else "action"
+        return {"answers": {key: {"choice": "approach" if key == "phase" else "y_pos_coarse"}}}
+
+    monkeypatch.setattr(controller, "_post", post)
+    controller.decide(observation(level=level, object_xyz=[0.0, 0.9, 0.2], goal_xyz=[0.0, 0.9, 0.1],
+                                  window_slide_m=0.02, button_remaining_travel_m=0.03), "Press down.")
+    for request in sent:
+        assert ("window_slide_m" in request["state"]) == (level == 2)
+        assert ("button_remaining_travel_m" in request["state"]) == (level == 2)
+        assert "Press down." not in json.dumps(request)
+    assert "target_evidence" not in json.dumps(sent)
 
 
 def test_stall_history_is_evidence_and_does_not_override_repeated_model_choice(monkeypatch):
@@ -227,8 +249,9 @@ def test_stall_history_is_evidence_and_does_not_override_repeated_model_choice(m
         assert decision.action == Action.Y_POS and decision.action_scale == 0.25
     history = sent[-1]["state"]
     assert history["consecutive_same_action"] == 2
-    assert history["decisions_in_previous_phase"] == 2
-    assert history["motion_history"]["consecutive_stalled_movements"] == 2
+    assert history["last_tcp_motion_xyz"] == [0.0, 0.0, 0.0]
+    assert decision.request["observation_audit"]["history"]["decisions_in_previous_phase"] == 2
+    assert decision.request["observation_audit"]["history"]["motion_history"]["consecutive_stalled_movements"] == 2
     controller.decide(observation(step=0), "Press the button.")
     assert "previous_action" not in sent[-1]["state"]
     assert "motion_history" not in sent[-1]["state"]
@@ -247,9 +270,10 @@ def test_gripper_change_is_not_stall_and_reversal_is_recorded_without_forcing_an
 
     monkeypatch.setattr(controller, "_post", post)
     for step in range(4):
-        controller.decide(observation(step=step, gripper="open" if step == 0 else "closed"), "Press the button.")
+        decision = controller.decide(observation(step=step, gripper="open" if step == 0 else "closed"), "Press the button.")
+        if step == 1:
+            assert decision.request["observation_audit"]["history"]["motion_history"]["consecutive_stalled_movements"] == 0
     assert sent[3]["state"]["previous_action"] == "grip_close"
-    assert sent[3]["state"]["motion_history"]["consecutive_stalled_movements"] == 0
     assert sent[-1]["state"]["consecutive_axis_reversals"] == 1
     assert controller._adaptive_axis_reversals == 2
 

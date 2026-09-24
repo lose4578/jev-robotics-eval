@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from .core import ACTION_DESCRIPTIONS, Action
 
 
-HIERARCHY_PROTOCOL = "jev.phase_scaled_primitive.v3"
-PHASE_FIXED_PROTOCOL = "jev.phase_fixed_primitive.v3"
+HIERARCHY_PROTOCOL = "jev.phase_scaled_primitive.v4"
+PHASE_FIXED_PROTOCOL = "jev.phase_fixed_primitive.v4"
 MOTION_SCALES = {"fine": 0.25, "normal": 0.5, "coarse": 1.0}
 _XYZ = (Action.X_POS, Action.X_NEG, Action.Y_POS, Action.Y_NEG, Action.Z_POS, Action.Z_NEG)
 

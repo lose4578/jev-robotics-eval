@@ -18,15 +18,17 @@ CONTACT_SURFACES = {
     "place_object_scale": "small object beside the scale", "reach-v3": "target point",
 }
 _PHASE_FACTS = {"both_fingers_touch_object", "object_lift_m", "door_angle_rad",
-                "assembly_geometry_success", "nut_center_goal_xy_m", "nut_center_below_peg_top_m"}
-_ACTION_KEYS = {
-    "task", "task_name", "privilege_level", "environment", "active_arm", "coordinate_frame",
-    "control_xyz", "gripper_command", "gripper_opening", "object_xyz", "goal_xyz",
-    "peg_head_xyz", "nut_center_xyz", "target_evidence", "action_screen_directions", "tcp_pixel",
-    "nominal_motion_step_m", "previous_action", "previous_candidate", "previous_action_scale",
-    "consecutive_same_action", "consecutive_axis_reversals", "last_tcp_motion_xyz", "motion_history",
-    "previous_inferred_phase", "decisions_in_previous_phase",
-} | _PHASE_FACTS
+                "assembly_geometry_success", "nut_center_goal_xy_m", "nut_center_below_peg_top_m",
+                "window_slide_m", "button_remaining_travel_m"}
+_OPERATIONS = {
+    "approach": "Approach the current contact point.", "contact": "Establish contact at the current contact point.",
+    "lower": "Align the fingers at the object's grasping height.", "grasp": "Establish a stable hold around the object.",
+    "lift": "Raise the held object clear of nearby surfaces.", "transfer": "Carry the held object to its destination.",
+    "place": "Seat the held object at its destination and release when appropriate.",
+    "press": "Complete the actuator stroke while keeping contact.", "push": "Move the contacted object toward its destination.",
+    "move": "Move the engaged handle toward its destination.", "refine": "Align with the current target point.",
+    "recover": "Reestablish alignment with the current contact point.",
+}
 
 
 def compact_phase_state(state: dict, task_name: str, family: str, targets: dict) -> dict:
@@ -43,9 +45,31 @@ def compact_phase_state(state: dict, task_name: str, family: str, targets: dict)
     return result
 
 
-def compact_action_state(state: dict) -> dict:
-    """Retain action evidence and calibration while excluding joints and the full scene."""
-    return {key: value for key, value in state.items() if key in _ACTION_KEYS}
+def compact_action_state(state: dict, task_name: str, family: str, phase: str, targets: dict) -> dict:
+    """Expose only the model-selected phase's current target, calibration, and short history."""
+    role = phase_target_role(family, phase, state.get("environment"))
+    result = {"robot_tcp_xyz": state["control_xyz"], "inferred_phase": phase,
+              "gripper_command": state["gripper_command"], "task": _OPERATIONS[phase]}
+    if family == "reach":
+        result["task"] = "Align with the current target point."
+    if state.get("privilege_level") in {1, 2} and role in targets:
+        result[f"current_{role}_xyz"] = targets[role]["target_xyz"]
+    else:
+        result["current_target_surface"] = (CONTACT_SURFACES.get(task_name, "movable object") if role == "contact"
+                                             else "visible destination" if role == "destination"
+                                             else "clear space above the held object")
+    for key in ("nominal_motion_step_m", "previous_action", "last_tcp_motion_xyz", "consecutive_same_action",
+                "consecutive_axis_reversals", "tcp_pixel"):
+        if key in state:
+            result[key] = state[key]
+    if "action_screen_directions" in state:
+        result["action_screen_directions"] = {
+            key: value.get("delta_px") if isinstance(value, dict) else value
+            for key, value in state["action_screen_directions"].items()
+        }
+    if state.get("privilege_level") == 2:
+        result.update({key: state[key] for key in sorted(_PHASE_FACTS) if key in state})
+    return result
 
 
 def _point(value):
@@ -102,26 +126,29 @@ def candidate_grounding(action: Action, family: str, phase: str, evidence: dict,
                         nominal_motion_step_m: float | None = None) -> str:
     """Describe both signs; do not choose or remove any action based on geometry."""
     role = phase_target_role(family, phase, environment)
-    if action in {Action.GRIP_OPEN, Action.GRIP_CLOSE, Action.HOLD}:
-        return "No target alignment motion."
+    if action == Action.GRIP_CLOSE:
+        return "The fingers already surround the current contact point and closing is needed."
+    if action == Action.GRIP_OPEN:
+        return "The fingers need to open for acquisition or release at the current target."
+    if action == Action.HOLD:
+        return "The TCP is already at the current target, or a gripper change is settling."
     nominal = (float(nominal_motion_step_m) * scale
                if isinstance(nominal_motion_step_m, Real) and not isinstance(nominal_motion_step_m, bool)
                and math.isfinite(nominal_motion_step_m) and nominal_motion_step_m > 0 else None)
-    calibration = f" Nominal motion {nominal:.4g} m; actual motion may differ." if nominal is not None else ""
+    calibration = f" Nominal step {nominal:.4f} m." if nominal is not None else f" Movement scale {scale:g}."
     if role is None:
         return "Lift clearance: upward motion raises the held object; image evidence must establish that it is held." + calibration
-    label = "Contact alignment" if role == "contact" else "Destination alignment after engagement"
-    point = evidence.get(role)
-    if point is None:
-        return f"{label}: judge direction from the visible {'contact surface' if role == 'contact' else 'destination'} and TCP." + calibration
     axis = "xyz".index(action.value[0])
     sign = 1 if action.value.endswith("pos") else -1
+    axis_name = action.value[0].upper()
+    condition = f"Appropriate when target {axis_name} is {'greater' if sign > 0 else 'smaller'} than TCP {axis_name}."
+    point = evidence.get(role)
+    if point is None:
+        return (f"Appropriate when the visible {'contact surface' if role == 'contact' else 'destination'} lies in "
+                f"{'positive' if sign > 0 else 'negative'} world {axis_name} from the TCP; use the image motion calibration." + calibration)
     delta = point["delta_xyz"][axis]
-    relation = ("initially reduces" if sign * delta > 0 else
-                "increases" if sign * delta < 0 else "moves away from zero")
-    description = f"{label}: {action.value} {relation} axis error (target minus TCP {delta:+.4f} m)." + calibration
+    relation = "toward" if sign * delta > 0 else "away from"
+    description = condition + f" This moves {relation} the {role} coordinate; current signed error {delta:+.4f} m." + calibration
     if nominal is not None and sign * delta > 0 and nominal > abs(delta):
         description += " This nominal step may cross the target coordinate."
-    if role == "destination" and family != "reach" and "contact" in evidence:
-        description += f" Current contact point remains {evidence['contact']['distance_m']:.3f} m from TCP; destination travel requires engagement."
     return description
