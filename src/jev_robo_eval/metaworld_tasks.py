@@ -69,6 +69,15 @@ def task_facts(env, task_name, obs, control, initial_object):
     if task_name == "door-open-v3":
         distance = float(abs(obj[0] - goal[0]))
         facts["door_angle_rad"] = round(float(env.data.joint("doorjoint").qpos[0]), 4)
+    elif task_name in {"window-open-v3", "window-close-v3"}:
+        # MetaWorld's window success predicate uses handle X, not XYZ distance.
+        distance = float(abs(obj[0] - goal[0]))
+        facts["window_slide_m"] = round(float(env.data.joint("window_slide").qpos[0]), 4)
+    elif task_name in {"button-press-v3", "button-press-topdown-v3"}:
+        # The front button travels along Y; the upward-facing button along Z.
+        axis = 2 if task_name == "button-press-topdown-v3" else 1
+        distance = float(abs(obj[axis] - goal[axis]))
+        facts["button_remaining_travel_m"] = round(distance, 5)
     elif task_name == "peg-insert-side-v3":
         head = env.data.site("pegHead").xpos.copy()
         facts["peg_head_xyz"] = np.round(head, 4).tolist()

@@ -194,5 +194,5 @@ def test_benchmark_selects_complete_environment_task_set(tmp_path):
     ])
     parallel._validate(args, parser)
     assert args.tasks == list(parallel.METAWORLD_BENCHMARK_TASKS)
-    assert len(args.tasks) == 9
-    assert args.action_space == "metaworld_atomic"
+    assert len(args.tasks) == 16
+    assert args.action_space == "primitive"

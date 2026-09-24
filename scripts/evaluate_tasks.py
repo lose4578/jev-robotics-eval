@@ -34,7 +34,7 @@ def _trace_hashes(trace: Path) -> dict[str, str]:
             row = json.loads(line)
             if initial_state is None:
                 initial_state = row["state_before"]
-            actions.append(row["action"])
+            actions.append((row["action"], row.get("action_scale", 1.0)))
     if initial_state is None:
         return {}
 
@@ -173,7 +173,8 @@ def main():
                                        sensor_policy=args.sensor_policy, action_selection=args.action_selection,
                                        policy_seed=effective_policy_seed,
                                        sampling_temperature=args.sampling_temperature,
-                                       action_space=args.action_space)
+                                       action_space=args.action_space,
+                                       action_granularity=args.action_granularity)
                     if args.environment == "robotwin":
                         from jev_robo_eval.robotwin_env import RoboTwinEnvironment
                         env = RoboTwinEnvironment(task, root=args.robotwin_root,

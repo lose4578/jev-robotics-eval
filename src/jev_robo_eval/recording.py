@@ -30,9 +30,10 @@ class RecordingEnvironment:
         self._capture(observation, "reset")
         return observation
 
-    def step(self, action: Action) -> Transition:
-        transition = self.environment.step(action)
-        self._capture(transition.observation, f"decision {len(self.frames)} | {action.value}")
+    def step(self, action: Action, *, scale: float = 1.0) -> Transition:
+        transition = (self.environment.step(action) if scale == 1.0 else
+                      self.environment.step(action, scale=scale))
+        self._capture(transition.observation, f"decision {len(self.frames)} | {action.value} x{scale:g}")
         return transition
 
     def close(self) -> None:

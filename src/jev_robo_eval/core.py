@@ -64,11 +64,13 @@ class Decision:
     image_audit: dict[str, Any] = field(default_factory=dict)
     # Client action selection, separate from the model's original probabilities.
     selection: dict[str, Any] = field(default_factory=dict)
+    # Fraction of the environment's configured translation, chosen by the policy.
+    action_scale: float = 1.0
 
 
 class RobotEnvironment(Protocol):
     def reset(self, *, seed: int | None = None) -> Observation: ...
-    def step(self, action: Action) -> Transition: ...
+    def step(self, action: Action, *, scale: float = 1.0) -> Transition: ...
     def close(self) -> None: ...
 
 

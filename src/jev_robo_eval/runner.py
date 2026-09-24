@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from numbers import Real
 from dataclasses import dataclass
@@ -58,7 +59,15 @@ def run_episode(
             choice = (recovery.select(recovery_state, decision.action, number)
                       if recovery is not None else None)
             actual_action = choice.action if choice is not None else decision.action
-            transition = environment.step(actual_action)
+            proposed_scale = decision.action_scale
+            if (isinstance(proposed_scale, bool) or not isinstance(proposed_scale, Real)
+                    or not math.isfinite(proposed_scale) or not 0 < proposed_scale <= 1):
+                raise ValueError("Policy action_scale must be finite and in (0, 1]")
+            # Recovery has its own execution budget; it must not inherit the
+            # model's fine-motion scale when replacing an action.
+            action_scale = 1.0 if choice is not None and choice.intervention else float(proposed_scale)
+            transition = (environment.step(actual_action) if action_scale == 1.0 else
+                          environment.step(actual_action, scale=action_scale))
             if recovery is not None:
                 recovery.record_step(number, recovery_state, decision.action, choice)
             on_action_executed = getattr(policy, "on_action_executed", None)
@@ -72,6 +81,8 @@ def run_episode(
                 "decision": number,
                 "action": actual_action.value,
                 "proposed_action": decision.action.value,
+                "action_scale": action_scale,
+                "proposed_action_scale": float(proposed_scale),
                 "proposed_candidate": decision.selection.get("selected_candidate"),
                 "intervention": choice.intervention if choice is not None else None,
                 "decision_seconds": round(decision_seconds, 4),

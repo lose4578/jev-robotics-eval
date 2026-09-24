@@ -21,15 +21,12 @@ from threading import Lock
 import time
 from urllib.parse import urlparse
 from jev_robo_eval.observation_access import resolve_access
+from jev_robo_eval.task_registry import METAWORLD_TASKS, ROBOTWIN_TASKS, TASK_REGISTRY
 from jev_robo_eval.experiment_conditions import (add_condition_arguments,
     validate_condition_arguments, condition_config, condition_cli_arguments)
 
-METAWORLD_BENCHMARK_TASKS = (
-    "reach-v3", "push-v3", "door-open-v3", "drawer-open-v3",
-    "pick-place-v3", "peg-insert-side-v3", "shelf-place-v3",
-    "bin-picking-v3", "assembly-v3",
-)
-ROBOTWIN_BENCHMARK_TASKS = ("click_bell", "press_stapler", "move_pillbottle_pad")
+METAWORLD_BENCHMARK_TASKS = METAWORLD_TASKS
+ROBOTWIN_BENCHMARK_TASKS = ROBOTWIN_TASKS
 
 
 def _now() -> str:
@@ -54,7 +51,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--gif-dir", type=Path, default=Path("runs/gifs"))
     parser.add_argument("--action-space", choices=("primitive", "metaworld_atomic"),
-                        help="Primitive by default; complete MetaWorld benchmark defaults to bounded intents")
+                        help="Primitive by default; bounded intents are a separate MetaWorld controller")
     parser.add_argument("--mode", choices=("text", "vision"), default="text")
     parser.add_argument("--information", choices=("privileged", "nonprivileged"))
     parser.add_argument("--privilege-level", type=int, choices=(0, 1, 2, 3))
@@ -83,7 +80,7 @@ def _validate(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None
     elif not args.tasks:
         parser.error("--tasks is required unless --benchmark is used")
     if args.action_space is None:
-        args.action_space = "metaworld_atomic" if args.benchmark and args.environment == "metaworld" else "primitive"
+        args.action_space = "primitive"
     try:
         args.information, args.guidance, args.privilege_level = resolve_access(
             args.information or "privileged", args.guidance, args.privilege_level)
@@ -95,6 +92,11 @@ def _validate(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None
         parser.error(str(exc))
     if args.environment == "robotwin" and args.action_space == "metaworld_atomic":
         parser.error("metaworld_atomic is currently implemented only for MetaWorld")
+    if args.privilege_level == 3:
+        unsupported = [task for task in args.tasks if task not in TASK_REGISTRY
+                       or not TASK_REGISTRY[task].oracle_supported]
+        if unsupported:
+            parser.error(f"No L3 oracle guide for: {', '.join(unsupported)}; use L0/L1/L2 or supported --tasks")
     if args.action_space == "metaworld_atomic" and args.privilege_level == 0 and not args.proprio_projection:
         parser.error("L0 metaworld_atomic requires --proprio-projection")
     if len(set(args.jev_urls)) != len(args.jev_urls):

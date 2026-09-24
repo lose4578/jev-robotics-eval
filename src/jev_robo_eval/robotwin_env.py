@@ -19,6 +19,7 @@ from PIL import Image
 from .core import Action, Observation, Transition
 from .observation_access import filter_policy_state, validate_plan_only
 from .robotwin_tasks import TASKS
+from .task_registry import TASK_REGISTRY
 
 
 _AXES = {
@@ -103,6 +104,8 @@ class RoboTwinEnvironment:
             raise ValueError("mode must be text or vision")
         if privilege_level not in {0, 1, 2, 3}:
             raise ValueError("privilege_level must be 0, 1, 2, or 3")
+        if privilege_level == 3 and not TASK_REGISTRY[task_name].oracle_supported:
+            raise ValueError(f"No L3 oracle guide for {task_name}; use L0/L1/L2")
         if active_arm not in {"left", "right"}:
             raise ValueError("active_arm must be left or right")
         if not task_config.isidentifier():
@@ -236,7 +239,10 @@ class RoboTwinEnvironment:
         actor = getattr(self.task, spec.actor)
         object_xyz = np.asarray(actor.get_pose().p, dtype=float)
         if spec.goal_actor:
-            goal_xyz = np.asarray(getattr(self.task, spec.goal_actor).get_pose().p, dtype=float)
+            goal_actor = getattr(self.task, spec.goal_actor)
+            goal_xyz = np.asarray(goal_actor.get_functional_point(spec.goal_functional_point)[:3]
+                                  if spec.goal_functional_point is not None else goal_actor.get_pose().p,
+                                  dtype=float)
         else:
             goal_xyz = np.asarray(actor.get_contact_point(spec.contact_point)[:3], dtype=float)
         return object_xyz, goal_xyz
@@ -435,7 +441,9 @@ class RoboTwinEnvironment:
         self._success = bool(self.task.check_success())
         return self._observation()
 
-    def step(self, action: Action) -> Transition:
+    def step(self, action: Action, *, scale: float = 1.0) -> Transition:
+        if isinstance(scale, bool) or not np.isfinite(scale) or not 0 < scale <= 1:
+            raise ValueError("scale must be finite and in (0, 1]")
         if self.task is None:
             raise RuntimeError("Call reset before step")
         action = Action(action)
@@ -448,7 +456,7 @@ class RoboTwinEnvironment:
         for _ in range(attempts):
             if action in _AXES:
                 pose = np.asarray(task.get_arm_pose(arm), dtype=float)
-                pose[:3] += np.asarray(_AXES[action]) * (0.02 * self.move_scale)
+                pose[:3] += np.asarray(_AXES[action]) * (0.02 * self.move_scale * scale)
                 task.plan_success = True
                 command_ok = bool(task.move(task.move_to_pose(arm, pose)))
             elif action == Action.GRIP_OPEN:

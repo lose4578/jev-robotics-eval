@@ -70,7 +70,7 @@ def main() -> None:
     policy = JevPolicy(mode=args.mode, url=args.jev_url, api_key=os.environ.get("JEV_API_KEY"),
                        sensor_policy=args.sensor_policy, action_selection=args.action_selection,
                        policy_seed=args.policy_seed, sampling_temperature=args.sampling_temperature,
-                       action_space=args.action_space)
+                       action_space=args.action_space, action_granularity=args.action_granularity)
     result = run_episode(
         environment,
         policy,

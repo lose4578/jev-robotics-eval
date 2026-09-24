@@ -68,14 +68,14 @@ def main() -> None:
     try:
         capture(env.reset(seed=args.seed), 0, "reset", "running", recorded_state=rows[0].get("state_before"))
         for number, row in enumerate(rows, 1):
-            transition = env.step(Action(row["action"]))
+            transition = env.step(Action(row["action"]), scale=row.get("action_scale", 1.0))
             if (transition.success != row["success"]
                     or transition.observation.state["simulator_steps"] != row["state"]["simulator_steps"]
                     or not np.isclose(transition.reward, row["reward"], rtol=1e-6, atol=1e-6)):
                 raise RuntimeError(f"Replay diverged at decision {number}; verify task/seed/action-repeat")
             status = "SUCCESS" if transition.success else "time limit" if transition.truncated else "decision limit" if number == len(rows) else "running"
             capture(transition.observation, number,
-                    row["action"] + (" [ASSIST]" if row.get("intervention") else ""), status,
+                    row["action"] + f" x{row.get('action_scale', 1.0):g}" + (" [ASSIST]" if row.get("intervention") else ""), status,
                     row["state"].get("active_waypoint", {}).get("phase"), row["state"])
     finally:
         env.close()

@@ -1,7 +1,7 @@
 'use strict';
 const byId = id => document.getElementById(id);
 const statusLabels = {success: '成功', failed: '任务失败', error: '执行异常', running: '运行中', pending: '待运行 / 待同步', unknown: '结果未知'};
-const filters = ['search', 'environment', 'control-mode', 'experiment', 'information', 'level', 'condition', 'plan-only', 'recovery', 'status', 'mode', 'selection', 'replay'];
+const filters = ['search', 'environment', 'control-mode', 'granularity', 'experiment', 'information', 'level', 'condition', 'plan-only', 'recovery', 'status', 'mode', 'selection', 'replay'];
 const controlLabels = {hierarchical_staged: '分层控制 · JEV 阶段 → 动作', atomic: '原子动作 · 意图 / 视觉方向', direct: '直接控制 · 基础动作', oracle_waypoints: 'Oracle 路标辅助', unknown: '控制模式未标注'};
 let snapshot = null;
 let previousPayload = '';
@@ -67,6 +67,7 @@ function matches(run) {
   return terms.every(term => haystack.includes(term)) &&
     (byId('environment').value === 'all' || byId('environment').value === (run.environment ?? 'metaworld')) &&
     matchesControl(run, byId('control-mode').value) &&
+    (byId('granularity').value === 'all' || byId('granularity').value === (run.config?.action_granularity ?? 'fixed')) &&
     (byId('experiment').value === 'all' || byId('experiment').value === run.experiment) &&
     (byId('information').value === 'all' || byId('information').value === run.information) &&
     (byId('level').value === 'all' || byId('level').value === String(run.privilege_level ?? 'unknown')) &&
@@ -79,7 +80,7 @@ function matches(run) {
     (byId('replay').value === 'all' || (byId('replay').value === 'yes') === Boolean(run.gif_url));
 }
 function configText(config) {
-  const labels = {condition: '条件', plan_only: '仅计划/路标', stuck_recovery: '脱困辅助', recovery_window: '检测窗口', recovery_displacement_m: '位移阈值(m)', recovery_cooldown: '冷却', recovery_max_interventions: '最大干预', recovery_steps: '干预步数', mode: '模式', sensor_policy: '策略', action_selection: '动作选择', sampling_temperature: '采样温度', guidance: '引导', action_repeat: '重复', move_scale: '步幅', max_decisions: '决策上限', task_index: '任务索引', image_size: '图像'};
+  const labels = {action_granularity: '动作粒度', condition: '条件', plan_only: '仅计划/路标', stuck_recovery: '脱困辅助', recovery_window: '检测窗口', recovery_displacement_m: '位移阈值(m)', recovery_cooldown: '冷却', recovery_max_interventions: '最大干预', recovery_steps: '干预步数', mode: '模式', sensor_policy: '策略', action_selection: '动作选择', sampling_temperature: '采样温度', guidance: '引导', action_repeat: '重复', move_scale: '步幅', max_decisions: '决策上限', task_index: '任务索引', image_size: '图像'};
   return Object.entries(labels).filter(([key]) => config[key] !== undefined)
     .map(([key, label]) => `${label} ${config[key]}`).join(' · ');
 }
@@ -170,6 +171,7 @@ function renderCard(run) {
   top.append(badge(run.issue === 'zero_actions' ? '零动作异常' : statusLabels[run.status], run.status), badge(levelText(run), `level level-${run.privilege_level}`));
   top.append(badge(controlText(run), 'control'));
   const metadata = element('div', 'metadata');
+  metadata.append(element('span', '', {adaptive: '任务阶段 / JEV 自选粗中细', 'phase-fixed': '任务阶段 / 固定步幅', fixed: '原阶段 / 固定步幅'}[run.config?.action_granularity ?? 'fixed']));
   metadata.append(element('span', '', `env seed ${run.seed ?? '?'}`), element('span', '', `第 ${run.episode_index ?? 1} 回合`), element('span', '', run.mode));
   metadata.append(element('span', '', samplingText(run)), element('span', '', recoveryText(run)));
   if (run.policy_seed !== null && run.policy_seed !== undefined) metadata.append(element('span', '', `policy seed ${run.policy_seed}`));

@@ -289,7 +289,9 @@ class MetaWorldMT1:
             self.guide.reset()
         return self._observation()
 
-    def step(self, action: Action) -> Transition:
+    def step(self, action: Action, *, scale: float = 1.0) -> Transition:
+        if isinstance(scale, bool) or not np.isfinite(scale) or not 0 < scale <= 1:
+            raise ValueError("scale must be finite and in (0, 1]")
         if self._raw_obs is None:
             raise RuntimeError("Call reset before step")
         if action == Action.GRIP_OPEN:
@@ -298,7 +300,7 @@ class MetaWorldMT1:
             self._gripper = 1.0
         xyz = _DIRECTION.get(action, (0, 0, 0))
         command = np.asarray((*xyz, self._gripper), dtype=np.float32)
-        command[:3] *= self.move_scale
+        command[:3] *= self.move_scale * scale
         reward_total = 0.0
         terminated = truncated = success = False
         info: dict[str, Any] = {}

@@ -10,14 +10,47 @@ TASK_GOALS = {
     "shelf-place-v3": "Pick up the object and place it on the shelf at goal_xyz.",
     "bin-picking-v3": "Pick up the object in the source bin, lift it over the rim, and place it in the target bin at goal_xyz.",
     "assembly-v3": "Pick up the ring-shaped nut and lower its hole over the vertical peg at goal_xyz.",
+    "button-press-v3": "Press the front-facing button inward into its box.",
+    "button-press-topdown-v3": "Press the upward-facing button down into its box.",
+    "drawer-close-v3": "Push the open drawer inward until it is closed.",
+    "window-open-v3": "Move the window handle along its horizontal track to open the window.",
+    "window-close-v3": "Move the window handle along its horizontal track to close the window.",
+    "plate-slide-v3": "Slide the round plate across the table into the visible goal slot.",
+    "plate-slide-side-v3": "Slide the round plate sideways across the table into the visible goal slot.",
     "click_bell": "Press down on the top of the visible bell using the active robot arm.",
     "press_stapler": "Press the top of the visible stapler down using the active robot arm.",
     "move_pillbottle_pad": "Pick up the pill bottle and place it upright on the visible pad.",
+    "click_alarmclock": "Press down on the top button of the visible alarm clock using the active robot arm.",
+    "place_container_plate": "Pick up the visible cup or bowl, place it on the plate, and release it.",
+    "place_object_scale": "Pick up the small object beside the electronic scale, place it on top of the scale, and release it.",
 }
 
 # These descriptions identify visible objects and intended outcomes without
 # supplying simulator object positions, target coordinates, or contact state.
 SENSOR_TASK_GOALS = {
+    "reach-v3": (
+        "Move the gripper center to the task target. This task's target is an invisible simulator "
+        "point when goal markers are hidden; an RGB-only observation cannot identify it."
+    ),
+    "push-v3": (
+        "Push the small object across the table to the task target. This task's target is an "
+        "invisible simulator point when goal markers are hidden; an RGB-only observation cannot identify it."
+    ),
+    "door-open-v3": "From the camera image, find the door handle and pull it to open the hinged door.",
+    "drawer-open-v3": "From the camera image, find the drawer handle and pull the drawer out to open it.",
+    "pick-place-v3": (
+        "Grasp and lift the small object, then carry it to the task target. This task's target is "
+        "an invisible simulator point when goal markers are hidden; an RGB-only observation cannot identify it."
+    ),
+    "peg-insert-side-v3": (
+        "From the camera image, find the loose peg and the side-facing hole in the box. "
+        "Grasp the peg and insert its tip into the hole."
+    ),
+    **{name: TASK_GOALS[name] for name in (
+        "button-press-v3", "button-press-topdown-v3", "drawer-close-v3",
+        "window-open-v3", "window-close-v3", "plate-slide-v3", "plate-slide-side-v3",
+        "click_alarmclock", "place_container_plate", "place_object_scale",
+    )},
     "click_bell": TASK_GOALS["click_bell"],
     "press_stapler": TASK_GOALS["press_stapler"],
     "move_pillbottle_pad": TASK_GOALS["move_pillbottle_pad"],

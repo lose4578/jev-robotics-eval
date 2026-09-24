@@ -24,7 +24,7 @@ import time
 from urllib.parse import quote, unquote, urlsplit
 
 CONFIG_FIELDS = (
-    "environment", "mode", "information", "privilege_level", "sensor_policy", "action_space", "control_mode", "benchmark", "guidance", "plan_only", "condition",
+    "environment", "mode", "information", "privilege_level", "sensor_policy", "action_space", "action_granularity", "control_mode", "benchmark", "guidance", "plan_only", "condition",
     "stuck_recovery",
     "recovery_window", "recovery_displacement_m", "recovery_cooldown", "recovery_max_interventions", "recovery_steps",
     "image_size", "annotate_vision", "proprio_projection", "action_repeat",

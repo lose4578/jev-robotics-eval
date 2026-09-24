@@ -22,6 +22,7 @@ from .atomic_actions import (
     metaworld_atomic_candidates,
 )
 from .core import ACTION_DESCRIPTIONS, Action, Decision, Observation
+from .hierarchy import HIERARCHY_PROTOCOL, PHASE_FIXED_PROTOCOL, MotionCandidate, eligible_phases, phase_action_candidates, schema_for_task
 from .tasks import ROBOTWIN_TASK_GUIDES, TASK_GUIDES, task_goal
 from .observation_access import filter_policy_state
 
@@ -139,6 +140,7 @@ class JevPolicy:
         policy_seed: int = 0,
         sampling_temperature: float = 1.0,
         action_space: str = "primitive",
+        action_granularity: str = "fixed",
     ) -> None:
         if mode not in {"text", "vision"}:
             raise ValueError("mode must be text or vision")
@@ -156,6 +158,12 @@ class JevPolicy:
                    "metaworld_atomic": "metaworld_atomic", "atomic": "metaworld_atomic"}
         if action_space not in aliases:
             raise ValueError("action_space must be primitive or metaworld_atomic")
+        if action_granularity not in {"fixed", "adaptive", "phase-fixed"}:
+            raise ValueError("action_granularity must be fixed, adaptive, or phase-fixed")
+        if action_granularity != "fixed" and (
+                mode != "vision" or sensor_policy != "staged" or aliases[action_space] != "primitive"):
+            raise ValueError(f"{action_granularity} action granularity requires vision mode, staged sensor policy, and primitive actions")
+        self.action_granularity = action_granularity
         self.action_selection = action_selection
         self.policy_seed = policy_seed
         self.sampling_temperature = sampling_temperature
@@ -183,6 +191,12 @@ class JevPolicy:
         self._sensor_last_step: int | None = None
         self._atomic_lift_steps = 0
         self._atomic_executor = MetaWorldAtomicExecutor()
+        self._adaptive_last_candidate: str | None = None
+        self._adaptive_last_scale: float | None = None
+        self._adaptive_action_repeats = 0
+        self._adaptive_phase_steps = 0
+        self._adaptive_stall_steps = 0
+        self._adaptive_axis_reversals = 0
 
     def _post(self, payload: dict) -> dict:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -205,6 +219,8 @@ class JevPolicy:
         raise RuntimeError("Jev remained busy")
 
     def decide(self, observation: Observation, task: str) -> Decision:
+        if self.action_granularity != "fixed":
+            return self._decide_adaptive(observation, task)
         level = observation.state.get("privilege_level")
         if observation.state.get("plan_only"):
             observation = Observation(state=filter_policy_state(observation.state, level, plan_only=True),
@@ -453,7 +469,188 @@ class JevPolicy:
 
     def on_action_executed(self, action: Action) -> None:
         """Use actual actuator history when a recovery controller overrides JEV."""
+        if self.action_granularity != "fixed" and action.value != self._sensor_last_action:
+            self._adaptive_last_candidate = None
+            self._adaptive_last_scale = None
+            self._adaptive_action_repeats = 1
+            self._adaptive_axis_reversals = 0
         self._sensor_last_action = action.value
+
+    def _decide_adaptive(self, observation: Observation, task: str) -> Decision:
+        state = observation.state
+        level = state.get("privilege_level", 0 if state.get("information") == "nonprivileged" else None)
+        if level not in {0, 1, 2} or state.get("plan_only") or "active_waypoint" in state:
+            raise ValueError(f"{self.action_granularity} action granularity requires privilege level 0, 1, or 2 without oracle waypoints")
+        task_name = str(state.get("task_name", "unknown"))
+        schema = schema_for_task(task_name)
+        # Apply the observation allowlist before constructing either model request.
+        # _sensor_state also validates required proprioception and image annotations.
+        sensors = _sensor_state(state, task_name)
+        visible_state = sensors if level == 0 else filter_policy_state(state, level)
+        task_text = (task if task and not any(name in task.lower() for name in ("goal_xyz", "object_xyz"))
+                     else task_goal(task_name, information="nonprivileged"))
+        model_state = {**visible_state, "task": task_text, "privilege_level": level,
+                       "task_family": schema.family, "task_semantics": schema.description}
+        step = int(state.get("control_steps", state.get("simulator_steps", 0)))
+        if (self._sensor_last_task != task_name or step == 0
+                or (self._sensor_last_step is not None and step <= self._sensor_last_step)):
+            self._sensor_last_action = None
+            self._sensor_last_phase = None
+            self._sensor_last_tcp = None
+            self._adaptive_last_candidate = None
+            self._adaptive_last_scale = None
+            self._adaptive_action_repeats = 0
+            self._adaptive_phase_steps = 0
+            self._adaptive_stall_steps = 0
+            self._adaptive_axis_reversals = 0
+        if self._sensor_last_action is not None:
+            model_state.update(previous_action=self._sensor_last_action,
+                               previous_candidate=self._adaptive_last_candidate,
+                               previous_action_scale=self._adaptive_last_scale,
+                               consecutive_same_action=self._adaptive_action_repeats,
+                               consecutive_axis_reversals=self._adaptive_axis_reversals)
+        if self._sensor_last_phase is not None:
+            model_state.update(previous_inferred_phase=self._sensor_last_phase,
+                               decisions_in_previous_phase=self._adaptive_phase_steps)
+        if self._sensor_last_tcp is not None:
+            motion = [float(now) - float(before)
+                      for now, before in zip(model_state["control_xyz"], self._sensor_last_tcp)]
+            model_state["last_tcp_motion_xyz"] = [round(value, 6) for value in motion]
+            last_was_motion = self._sensor_last_action in {"x_pos", "x_neg", "y_pos", "y_neg", "z_pos", "z_neg"}
+            stalled = last_was_motion and math.sqrt(sum(value * value for value in motion)) < 0.0001
+            self._adaptive_stall_steps = self._adaptive_stall_steps + 1 if stalled else 0
+            model_state["motion_history"] = {
+                "previous_movement_below_0_1mm": stalled,
+                "consecutive_stalled_movements": self._adaptive_stall_steps,
+                "evidence": "Robot TCP displacement only; this does not measure object or task progress.",
+            }
+        gripper_command = str(model_state["gripper_command"]).lower()
+        adaptive = self.action_granularity == "adaptive"
+        phase_choices, eligibility_reason = eligible_phases(schema, self._sensor_last_phase, gripper_command)
+        image_base64, image_audit = self._encode_image(observation)
+        image_audit["transport"] = self.vision_transport
+        phase_request = {
+            "model": MODEL, "state": model_state,
+            "questions": {"phase": {
+                "type": "choice", "criteria": phase_choices,
+                "instructions": (
+                    "Infer the current operation from the RGB image and permitted observation fields. "
+                    + schema.description + " " + eligibility_reason + " "
+                    "The previous inferred phase is a hypothesis. A gripper command alone cannot prove a grasp or contact. "
+                    "Repeated actions or low TCP motion are evidence to reassess "
+                    + ("alignment, scale, or recovery; " if adaptive else "alignment or recovery; ") +
+                    "contact can legitimately constrain motion. Use object pose or contact facts only if explicitly provided. "
+                    "Choose the contact operation only when current alignment and contact support it. "
+                    "Recovery is temporary: return to approach or contact when their visual conditions apply. "
+                    "A gripper setting change need not move the TCP and does not itself justify recovery. "
+                    + SENSOR_PHASE_TASK.get(task_name, "")
+                ),
+            }},
+        }
+        phase_result = self._post(self._vision_payload(phase_request, image_base64))
+        try:
+            answer = phase_result["answers"]["phase"]
+            phase = answer["choice"]
+            if phase not in phase_choices:
+                raise ValueError(f"Ineligible phase: {phase}")
+            probabilities = {str(key): float(value) for key, value in answer.get("probabilities", {}).items()}
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"Invalid Jev phase response: {phase_result!r}") from exc
+        phase_evidence = {"request": phase_request, "choice": phase, "probabilities": probabilities,
+                          "usage": self._response_usage(phase_result), "provenance": "model_inference"}
+        candidates = phase_action_candidates(schema, phase, gripper_command, self.action_granularity)
+        amplitude_instructions = (
+            "Each candidate chooses a primitive AND its movement amplitude. "
+            "Fine = 0.25, normal = 0.5, coarse = 1.0 times the configured movement amplitude, with the same duration. "
+            "Use coarse for clear travel, fine near contact or the target, and normal for intermediate corrections. "
+            if adaptive else
+            "Each candidate chooses a primitive. Every motion uses a fixed 1.0 times the configured movement "
+            "amplitude and the same duration; movement amplitude is not a model choice. "
+        )
+        instructions = (
+            "Choose exactly one candidate ID. " + amplitude_instructions
+            + f"Current inferred phase {phase}: {schema.phases[phase]} "
+            "Every motion changes one signed world axis. Decide the useful sign from the image and permitted state; "
+            "candidate order is not a recommendation. Gripper settings persist. Hold only to settle or if complete. "
+            "If repeated movement stalls or overshoots, reassess "
+            + ("direction and scale" if adaptive else "direction") + " from current evidence. "
+            "Axis reversal history can indicate oscillation, but does not prove an overshoot. Recheck the "
+            "current target direction before reversing. "
+            + ("Use fine corrections near alignment. " if adaptive else "") +
+            "action_screen_directions, when provided, maps world actions to image motion of the robot TCP. "
+            "tcp_pixel, when provided, is the calibrated robot TCP location; u grows right and v down. "
+            + SENSOR_PHASE_TASK.get(task_name, "")
+        )
+        if level >= 1:
+            instructions += (
+                " Use the permitted object, goal, and scene coordinates together with the image to identify the "
+                "current contact or placement target. Compare that target with control_xyz to select the signed axis: "
+                "target minus control positive means the positive action, and negative means the negative action. "
+                "The previous action is history, not a direction instruction."
+            )
+        action_request = {
+            "model": MODEL, "state": {**model_state, "inferred_phase": phase},
+            "candidate_protocol": HIERARCHY_PROTOCOL if adaptive else PHASE_FIXED_PROTOCOL,
+            "candidates": [candidate.to_dict() for candidate in candidates],
+            "questions": {"action": {"type": "choice", "instructions": instructions,
+                                     "criteria": {candidate.id: candidate.description for candidate in candidates}}},
+        }
+        result = self._post(self._vision_payload(action_request, image_base64))
+        decision = self._adaptive_decision_from_result(
+            result, {**action_request, "phase_decision": phase_evidence}, candidates, image_audit=image_audit)
+        self._adaptive_action_repeats = (self._adaptive_action_repeats + 1
+                                         if self._sensor_last_action == decision.action.value else 1)
+        opposite = {"x_pos": "x_neg", "x_neg": "x_pos", "y_pos": "y_neg", "y_neg": "y_pos",
+                    "z_pos": "z_neg", "z_neg": "z_pos"}
+        self._adaptive_axis_reversals = (self._adaptive_axis_reversals + 1
+                                         if opposite.get(self._sensor_last_action) == decision.action.value else 0)
+        self._adaptive_phase_steps = self._adaptive_phase_steps + 1 if self._sensor_last_phase == phase else 1
+        self._sensor_last_action = decision.action.value
+        self._sensor_last_phase = phase
+        self._sensor_last_tcp = list(model_state["control_xyz"])
+        self._sensor_last_task = task_name
+        self._sensor_last_step = step
+        self._adaptive_last_candidate = decision.selection["selected_candidate"]
+        self._adaptive_last_scale = decision.action_scale
+        return decision
+
+    def _adaptive_decision_from_result(
+        self, result: dict, request: dict, candidates: tuple[MotionCandidate, ...],
+        *, image_audit: dict | None = None,
+    ) -> Decision:
+        by_id = {candidate.id: candidate for candidate in candidates}
+        try:
+            answer = result["answers"]["action"]
+            selected_id = str(answer["choice"])
+            candidate = by_id[selected_id]
+            probabilities = {str(key): float(value) for key, value in answer.get("probabilities", {}).items()}
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"Invalid Jev {self.action_granularity} choice response: {result!r}") from exc
+        selection = {
+            "method": self.action_selection, "action_space": "primitive", "action_granularity": self.action_granularity,
+            "candidate_protocol": request["candidate_protocol"], "service_choice": selected_id,
+            "policy_seed": self.policy_seed, "sampling_temperature": self.sampling_temperature,
+            "phase_selection": "argmax", "inferred_phase": request["phase_decision"]["choice"],
+        }
+        if self.action_selection == "sample":
+            keys = list(by_id)
+            if (set(probabilities) != set(keys)
+                    or any(not math.isfinite(value) or value < 0 for value in probabilities.values())
+                    or not any(value > 0 for value in probabilities.values())):
+                raise RuntimeError(f"Sampling requires finite nonnegative probabilities for every {self.action_granularity} candidate and positive mass")
+            log_mass = [math.log(probabilities[key]) if probabilities[key] > 0 else -math.inf for key in keys]
+            peak = max(log_mass)
+            weights = [math.exp((value - peak) / self.sampling_temperature) for value in log_mass]
+            total = math.fsum(weights)
+            effective = [weight / total for weight in weights]
+            selected_id = self._action_rng.choices(keys, weights=effective, k=1)[0]
+            candidate = by_id[selected_id]
+            selection["effective_probabilities"] = dict(zip(keys, effective))
+        selection.update(selected_candidate=selected_id, selected_action=candidate.action.value,
+                         action_scale=candidate.scale)
+        return Decision(action=candidate.action, action_scale=candidate.scale, probabilities=probabilities,
+                        request=request, usage=self._response_usage(result), image_audit=image_audit or {},
+                        selection=selection)
 
     def _decide_visual(self, observation: Observation, task: str) -> Decision:
         if self.mode != "vision":
