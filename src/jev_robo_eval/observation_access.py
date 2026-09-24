@@ -7,7 +7,7 @@ SENSOR_KEYS = {
     "task_name", "coordinate_frame", "control_point", "control_xyz", "robot",
     "gripper_opening", "gripper_command", "simulator_steps", "information",
     "privilege_level", "camera_name", "action_screen_directions",
-    "environment", "active_arm", "control_steps", "tcp_pixel",
+    "environment", "active_arm", "control_steps", "tcp_pixel", "nominal_motion_step_m",
 }
 POSE_KEYS = {"object_xyz", "goal_xyz", "scene", "peg_head_xyz", "nut_center_xyz",
              "atomic_target_xyz"}
@@ -18,6 +18,7 @@ INTERACTION_KEYS = {
     "both_fingers_touch_object", "door_angle_rad", "goal_relative_to_peg_head",
     "goal_relative_to_nut_center", "nut_center_goal_xy_m", "nut_center_below_peg_top_m",
     "assembly_geometry_success", "success_distance_m",
+    "window_slide_m", "button_remaining_travel_m",
 }
 ROBOT_KEYS = {
     "hand_body_xyz", "hand_quat_wxyz", "arm_joint_order",

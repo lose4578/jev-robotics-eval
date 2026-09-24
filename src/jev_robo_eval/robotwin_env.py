@@ -262,14 +262,18 @@ class RoboTwinEnvironment:
             "arm_joint_velocity_rad_s": _vec(entity.get_qvel()[joint_indexes]),
         }
 
-    def _both_fingers_touch_object(self) -> bool:
-        if self.task_name != "move_pillbottle_pad":
-            return False
+    def _both_fingers_touch_object(self) -> bool | None:
+        """Measure active-arm contact with the registered movable actor.
+
+        A missing two-finger link mapping is unavailable evidence, not a
+        negative contact measurement. Other gripper topologies need their own
+        contact mapping before this fact can be exposed.
+        """
         robot = self.task.robot
         fingers = robot.left_gripper if self.active_arm == "left" else robot.right_gripper
         names = {joint.child_link.get_name() for joint, _, _ in fingers}
-        if len(names) < 2:
-            return False
+        if len(names) != 2:
+            return None
         object_name = getattr(self.task, TASKS[self.task_name].actor).get_name()
         touching: set[str] = set()
         for contact in self.task.scene.get_contacts():
@@ -373,6 +377,7 @@ class RoboTwinEnvironment:
             "coordinate_frame": "RoboTwin world XYZ, meters; +Z is upward",
             "control_point": f"{self.active_arm} gripper TCP",
             "active_arm": self.active_arm, "control_xyz": _vec(tcp),
+            "nominal_motion_step_m": 0.02 * self.move_scale * self.action_repeat,
             "robot": robot, "gripper_opening": round(opening, 4),
             "gripper_command": self._gripper_command,
             "simulator_steps": self._simulator_steps, "control_steps": self._control_steps,
@@ -392,8 +397,10 @@ class RoboTwinEnvironment:
             "success": self._success,
             "initialization": self._initialization,
         }
-        if self.task_name == "move_pillbottle_pad":
-            full["both_fingers_touch_object"] = self._both_fingers_touch_object()
+        if TASK_REGISTRY[self.task_name].family == "pick_place":
+            touching = self._both_fingers_touch_object()
+            if touching is not None:
+                full["both_fingers_touch_object"] = touching
         if self.privilege_level == 3:
             full["active_waypoint"] = self._waypoint(tcp, obj, goal, opening)
         if self.proprio_projection:

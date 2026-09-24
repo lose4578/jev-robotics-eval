@@ -209,6 +209,7 @@ class MetaWorldMT1:
             "coordinate_frame": "MetaWorld world XYZ; actions move end effector along one named axis",
             "control_point": "center between the two gripper fingers",
             "control_xyz": _vec(control_xyz),
+            "nominal_motion_step_m": float(self.env.action_scale * self.move_scale * self.action_repeat),
             "gripper_opening": round(float(obs[3]), 4),
             "goal_xyz": _vec(obs[-3:]),
             "goal_minus_control_xyz": _vec(obs[-3:] - control_xyz),
@@ -247,6 +248,7 @@ class MetaWorldMT1:
                 "coordinate_frame": "MetaWorld world XYZ; actions move end effector along one named axis",
                 "control_point": "center between the two gripper fingers",
                 "control_xyz": _vec(control_xyz),
+                "nominal_motion_step_m": evaluation_state["nominal_motion_step_m"],
                 "robot": {
                     "hand_body_xyz": list(robot["hand_body_xyz"]),
                     "hand_quat_wxyz": list(robot["hand_quat_wxyz"]),

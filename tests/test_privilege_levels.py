@@ -33,3 +33,16 @@ def test_grade_three_requires_waypoints_and_lower_grades_reject_them():
     for level in (0, 1, 2):
         with pytest.raises(ValueError):
             resolve_access(privilege_level=level, guidance="waypoints")
+
+
+@pytest.mark.parametrize("level", range(4))
+def test_mechanism_interaction_facts_require_l2(level):
+    facts = {"window_slide_m": 0.12, "button_remaining_travel_m": 0.04,
+             "unregistered_contact_fact": True}
+    state = filter_policy_state(facts, level)
+    for field in ("window_slide_m", "button_remaining_travel_m"):
+        assert (field in state) == (level >= 2)
+        if level >= 2:
+            assert state[field] == facts[field]
+    assert "unregistered_contact_fact" not in state
+    assert not facts.keys() & filter_policy_state(facts, 3, plan_only=True).keys()
