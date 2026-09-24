@@ -19,6 +19,18 @@ evaluator = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(evaluator)
 
 
+def test_action_hash_distinguishes_motion_scales_and_accepts_legacy_traces(tmp_path):
+    hashes = []
+    for name, extra in (("legacy", {}), ("coarse", {"action_scale": 1.0}),
+                        ("fine", {"action_scale": 0.25})):
+        trace = tmp_path / f"{name}.jsonl"
+        trace.write_text(json.dumps({"state_before": {"seed": 2}, "action": "x_pos", **extra}) + "\n")
+        hashes.append(evaluator._trace_hashes(trace))
+    assert len({item["initial_state_hash"] for item in hashes}) == 1
+    assert hashes[0]["action_sequence_hash"] == hashes[1]["action_sequence_hash"]
+    assert hashes[1]["action_sequence_hash"] != hashes[2]["action_sequence_hash"]
+
+
 def test_repeat_episodes_have_independent_traces_gifs_and_policy_seeds(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
