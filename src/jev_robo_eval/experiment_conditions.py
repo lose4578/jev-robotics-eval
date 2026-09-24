@@ -26,7 +26,13 @@ def add_condition_arguments(parser):
 
 
 def condition_config(args):
-    return {key: getattr(args, key) for key in CONDITION_FIELDS}
+    from .hierarchy import HIERARCHY_PROTOCOL, PHASE_FIXED_PROTOCOL
+
+    result = {key: getattr(args, key) for key in CONDITION_FIELDS}
+    result["hierarchy_protocol"] = {
+        "phase-fixed": PHASE_FIXED_PROTOCOL, "adaptive": HIERARCHY_PROTOCOL,
+    }.get(args.action_granularity)
+    return result
 
 
 def recovery_for_episode(args, episode_index=1):

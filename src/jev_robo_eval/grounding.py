@@ -6,6 +6,48 @@ from numbers import Real
 from .core import Action
 
 
+CONTACT_SURFACES = {
+    "button-press-topdown-v3": "red button top", "button-press-v3": "front button surface",
+    "click_bell": "bell top", "press_stapler": "stapler top", "click_alarmclock": "alarm clock top button",
+    "window-open-v3": "window handle", "window-close-v3": "window handle",
+    "drawer-open-v3": "drawer handle", "drawer-close-v3": "drawer handle",
+    "door-open-v3": "door handle", "door-close-v3": "door handle",
+    "plate-slide-v3": "round plate", "plate-slide-side-v3": "round plate",
+    "assembly-v3": "ring-shaped nut", "peg-insert-side-v3": "loose peg",
+    "move_pillbottle_pad": "pill bottle", "place_container_plate": "cup or bowl",
+    "place_object_scale": "small object beside the scale", "reach-v3": "target point",
+}
+_PHASE_FACTS = {"both_fingers_touch_object", "object_lift_m", "door_angle_rad",
+                "assembly_geometry_success", "nut_center_goal_xy_m", "nut_center_below_peg_top_m"}
+_ACTION_KEYS = {
+    "task", "task_name", "privilege_level", "environment", "active_arm", "coordinate_frame",
+    "control_xyz", "gripper_command", "gripper_opening", "object_xyz", "goal_xyz",
+    "peg_head_xyz", "nut_center_xyz", "target_evidence", "action_screen_directions", "tcp_pixel",
+    "nominal_motion_step_m", "previous_action", "previous_candidate", "previous_action_scale",
+    "consecutive_same_action", "consecutive_axis_reversals", "last_tcp_motion_xyz", "motion_history",
+    "previous_inferred_phase", "decisions_in_previous_phase",
+} | _PHASE_FACTS
+
+
+def compact_phase_state(state: dict, task_name: str, family: str, targets: dict) -> dict:
+    """Present current geometry without task verbs, intended phases, or bulky context."""
+    result = {"current_contact_surface": CONTACT_SURFACES.get(task_name, "movable object"),
+              "robot_tcp_xyz": state["control_xyz"], "gripper_command": state["gripper_command"]}
+    if state.get("privilege_level") in {1, 2}:
+        if "contact" in targets:
+            result["current_contact_xyz"] = targets["contact"]["target_xyz"]
+        if family in {"pick_place", "reach"} and "destination" in targets:
+            result["destination_xyz"] = targets["destination"]["target_xyz"]
+    if state.get("privilege_level") == 2:
+        result.update({key: state[key] for key in sorted(_PHASE_FACTS) if key in state})
+    return result
+
+
+def compact_action_state(state: dict) -> dict:
+    """Retain action evidence and calibration while excluding joints and the full scene."""
+    return {key: value for key, value in state.items() if key in _ACTION_KEYS}
+
+
 def _point(value):
     if (not isinstance(value, (list, tuple)) or len(value) != 3
             or any(isinstance(v, bool) or not isinstance(v, Real) or not math.isfinite(v) for v in value)):

@@ -176,7 +176,8 @@ def test_l0_hidden_truth_cannot_change_requests_candidates_or_decision(monkeypat
         decision = controller.decide(obs, "Press the visible button.")
         assert marker not in json.dumps(sent)
         assert "hidden_success" not in json.dumps(sent)
-        assert sent[0]["request"]["state"]["nominal_motion_step_m"] == 0.02
+        assert sent[1]["request"]["state"]["nominal_motion_step_m"] == 0.02
+        assert set(sent[0]["request"]["state"]) == {"current_contact_surface", "robot_tcp_xyz", "gripper_command"}
         recordings.append((sent, decision.action, decision.action_scale))
     assert recordings[0] == recordings[1]
 
@@ -196,12 +197,13 @@ def test_adaptive_uses_exact_level_budget_for_both_requests(monkeypatch, level):
     decision = controller.decide(observation(level=level, object_xyz=[0.1, 0.7, 0.1],
                                             goal_xyz=[0.1, 0.8, 0.1], both_fingers_touch_object=True,
                                             hidden_success=True), "Press the button.")
+    assert sent[0]["state"]["current_contact_xyz"] == [0.1, 0.7, 0.1]
+    assert sent[1]["state"]["object_xyz"] == [0.1, 0.7, 0.1]
     for request in sent:
-        assert request["state"]["object_xyz"] == [0.1, 0.7, 0.1]
         assert ("both_fingers_touch_object" in request["state"]) == (level == 2)
         assert "hidden_success" not in request["state"]
-        assert request["state"]["target_evidence"]["contact"]["source"] == "object_xyz"
-        assert request["state"]["target_evidence"]["contact"]["delta_xyz"] == [0.1, 0.1, -0.05]
+    assert sent[1]["state"]["target_evidence"]["contact"]["source"] == "object_xyz"
+    assert sent[1]["state"]["target_evidence"]["contact"]["delta_xyz"] == [0.1, 0.1, -0.05]
     criteria = sent[-1]["questions"]["action"]["criteria"]
     assert "initially reduces" in criteria["y_pos_fine"]
     assert "increases" in criteria["y_neg_fine"]
@@ -246,8 +248,8 @@ def test_gripper_change_is_not_stall_and_reversal_is_recorded_without_forcing_an
     monkeypatch.setattr(controller, "_post", post)
     for step in range(4):
         controller.decide(observation(step=step, gripper="open" if step == 0 else "closed"), "Press the button.")
-    assert sent[2]["state"]["previous_action"] == "grip_close"
-    assert sent[2]["state"]["motion_history"]["consecutive_stalled_movements"] == 0
+    assert sent[3]["state"]["previous_action"] == "grip_close"
+    assert sent[3]["state"]["motion_history"]["consecutive_stalled_movements"] == 0
     assert sent[-1]["state"]["consecutive_axis_reversals"] == 1
     assert controller._adaptive_axis_reversals == 2
 

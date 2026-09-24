@@ -3,7 +3,7 @@
 import pytest
 
 from jev_robo_eval.core import Action
-from jev_robo_eval.grounding import candidate_grounding, phase_target_role, target_evidence
+from jev_robo_eval.grounding import candidate_grounding, compact_action_state, compact_phase_state, phase_target_role, target_evidence
 
 
 def state(level=1, **extra):
@@ -67,3 +67,31 @@ def test_nominal_calibration_marks_possible_crossing_without_removing_a_choice()
     visual = candidate_grounding(Action.X_POS, "pressing", "approach", {},
                                  scale=0.25, nominal_motion_step_m=0.02)
     assert "0.005 m" in visual and "may cross" not in visual
+
+
+@pytest.mark.parametrize("level", [0, 1, 2])
+def test_compact_phase_excludes_intention_history_and_bulk_context(level):
+    visible = state(level=level, task="Press down immediately", task_semantics="press",
+                    gripper_command="open", previous_inferred_phase="press", previous_action="z_neg",
+                    scene={"geometry": "large scene"}, robot={"joint_vectors": [0.0] * 7},
+                    action_screen_directions={"z_neg": "down"}, both_fingers_touch_object=True)
+    compact = compact_phase_state(visible, "button-press-topdown-v3", "pressing", target_evidence(visible, "pressing"))
+    allowed = {"current_contact_surface", "robot_tcp_xyz", "gripper_command"}
+    if level >= 1:
+        allowed.add("current_contact_xyz")
+    if level == 2:
+        allowed.add("both_fingers_touch_object")
+    assert set(compact) == allowed
+    assert compact["current_contact_surface"] == "red button top"
+    action_state = compact_action_state(visible)
+    assert "scene" not in action_state and "robot" not in action_state and "task_semantics" not in action_state
+    assert action_state["task"] == "Press down immediately"
+    assert action_state["action_screen_directions"] == {"z_neg": "down"}
+
+
+@pytest.mark.parametrize("family", ["pick_place", "reach"])
+def test_compact_phase_keeps_destination_only_for_required_families(family):
+    visible = state(gripper_command="closed")
+    compact = compact_phase_state(visible, "reach-v3" if family == "reach" else "pick-place-v3",
+                                   family, target_evidence(visible, family))
+    assert compact["destination_xyz"] == visible["goal_xyz"]

@@ -172,6 +172,7 @@ function renderCard(run) {
   top.append(badge(controlText(run), 'control'));
   const metadata = element('div', 'metadata');
   metadata.append(element('span', '', {adaptive: '任务阶段 / JEV 自选粗中细', 'phase-fixed': '任务阶段 / 固定步幅', fixed: '原阶段 / 固定步幅'}[run.config?.action_granularity ?? 'fixed']));
+  if (run.config?.hierarchy_protocol) metadata.append(element('span', '', run.config.hierarchy_protocol));
   metadata.append(element('span', '', `env seed ${run.seed ?? '?'}`), element('span', '', `第 ${run.episode_index ?? 1} 回合`), element('span', '', run.mode));
   metadata.append(element('span', '', samplingText(run)), element('span', '', recoveryText(run)));
   if (run.policy_seed !== null && run.policy_seed !== undefined) metadata.append(element('span', '', `policy seed ${run.policy_seed}`));

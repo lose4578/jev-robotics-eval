@@ -23,7 +23,7 @@ from .atomic_actions import (
 )
 from .core import ACTION_DESCRIPTIONS, Action, Decision, Observation
 from .hierarchy import HIERARCHY_PROTOCOL, PHASE_FIXED_PROTOCOL, MotionCandidate, eligible_phases, phase_action_candidates, schema_for_task
-from .grounding import candidate_grounding, phase_target_role, target_evidence
+from .grounding import candidate_grounding, compact_action_state, compact_phase_state, phase_target_role, target_evidence
 from .tasks import ROBOTWIN_TASK_GUIDES, TASK_GUIDES, task_goal
 from .observation_access import filter_policy_state
 
@@ -539,20 +539,16 @@ class JevPolicy:
             }
         gripper_command = str(model_state["gripper_command"]).lower()
         adaptive = self.action_granularity == "adaptive"
-        phase_choices, eligibility_reason = eligible_phases(schema, self._sensor_last_phase, gripper_command)
+        phase_choices, _ = eligible_phases(schema, self._sensor_last_phase, gripper_command)
         image_base64, image_audit = self._encode_image(observation)
         image_audit["transport"] = self.vision_transport
         phase_request = {
-            "model": MODEL, "state": model_state,
+            "model": MODEL, "state": compact_phase_state(model_state, task_name, schema.family, targets),
             "questions": {"phase": {
                 "type": "choice", "criteria": phase_choices,
                 "instructions": (
-                    "Choose the CURRENT evidence state from the RGB image and permitted observation. "
-                    + eligibility_reason + " A large contact-point distance contradicts adjacency or established contact. "
-                    "target_evidence, when present, is derived only from permitted poses. "
-                    "A closed command alone proves neither holding nor contact. Low motion alone may reflect contact; "
-                    "recovery requires obstruction or lost engagement evidence. "
-                    + SENSOR_PHASE_TASK.get(task_name, "")
+                    "Classify the CURRENT physical relationship between the robot fingertips and the contact surface "
+                    "shown in the image. Choose the description supported by present evidence, not the intended future action."
                 ),
             }},
         }
@@ -613,7 +609,7 @@ class JevPolicy:
             )
         target_role = phase_target_role(schema.family, phase, state.get("environment"))
         action_request = {
-            "model": MODEL, "state": {**model_state, "inferred_phase": phase},
+            "model": MODEL, "state": {**compact_action_state(model_state), "inferred_phase": phase},
             "target_role": {"selected_by_model_phase": target_role,
                             "provenance": ("derived_from_permitted_pose" if target_role in targets
                                            else "phase_semantics" if target_role is None

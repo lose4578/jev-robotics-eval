@@ -25,7 +25,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 CONFIG_FIELDS = (
     "environment", "mode", "information", "privilege_level", "sensor_policy", "action_space", "action_granularity", "control_mode", "benchmark", "guidance", "plan_only", "condition",
-    "stuck_recovery",
+    "stuck_recovery", "hierarchy_protocol",
     "recovery_window", "recovery_displacement_m", "recovery_cooldown", "recovery_max_interventions", "recovery_steps",
     "image_size", "annotate_vision", "proprio_projection", "action_repeat",
     "move_scale", "max_decisions", "task_index", "action_selection", "sampling_temperature",

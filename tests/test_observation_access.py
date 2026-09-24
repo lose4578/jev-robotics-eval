@@ -11,7 +11,7 @@ from jev_robo_eval.metaworld_env import MetaWorldMT1
 POLICY_KEYS = {
     "task_name", "coordinate_frame", "control_point", "control_xyz",
     "robot", "gripper_opening", "gripper_command", "simulator_steps",
-    "information", "privilege_level",
+    "information", "privilege_level", "nominal_motion_step_m",
 }
 ROBOT_KEYS = {
     "hand_body_xyz", "hand_quat_wxyz", "arm_joint_order",
@@ -39,6 +39,8 @@ def test_nonprivileged_observation_is_isolated_and_render_restored(task: str) ->
     try:
         observation = env.reset(seed=0)
         assert set(observation.state) == POLICY_KEYS
+        assert observation.state["nominal_motion_step_m"] == pytest.approx(
+            env.env.action_scale * env.move_scale * env.action_repeat)
         assert set(observation.state["robot"]) == ROBOT_KEYS
         assert observation.state["information"] == "nonprivileged"
         assert observation.evaluation_state is not None
